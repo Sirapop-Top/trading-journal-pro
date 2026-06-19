@@ -334,3 +334,29 @@ function deleteTrade(tradeId) {
 > The Apps Script code inside Google's cloud editor must also be updated manually by the user (copy from `github_sheets_serverless_deployment_guide.md` → paste into [script.google.com](https://script.google.com) → Save → Re-deploy). The frontend fix alone is not enough for delete to work correctly.
 
 **Commit:** `8bc94df` — `Fix delete wrong trade bug: ID now equals actual sheet row number, fixes off-by-1 in deleteTrade`
+
+---
+
+### [2026-06-19] — Fix: Onboarding Watermarks & Portfolio Management / Transfers in Cloud Mode
+
+**Symptom:**
+1. Confusing example strings displayed as hardcoded input placeholders (watermarks) in Google Sheet ID and Apps Script URL fields on the onboarding screen.
+2. Clicking "Transfer" to move an asset to another portfolio on mobile (Cloud Mode) resulted in a "Failed to transfer position" error popup.
+
+**Root Causes:**
+1. Watermark placeholders were hardcoded directly in onboarding inputs: `placeholder="e.g. 1kUYZcvNnbw..."`.
+2. Portfolio CRUD operations (`handleTransferPosition`, `handleDeletePortfolio`, `handleRenamePortfolio`) made raw `axios.put`/`axios.delete` requests to the local FastAPI backend. Since Cloud Mode (GitHub Pages hosting) has no running FastAPI backend server, these calls failed with Network/CORS errors.
+
+**Fixes Applied (`frontend/src/App.jsx`):**
+1. **Watermarks Removed:** Cleared all hardcoded examples from Google Sheet ID and Apps Script URL inputs (`placeholder=""`) on both the Onboarding Setup Screen and the Settings panel.
+2. **Cloud Mode Portfolio Operations Routing:**
+   - **`handleTransferPosition`:** In Cloud Mode, saves custom asset-to-portfolio assignments directly in `localStorage` under `alphatrader_portfolio_mappings`.
+   - **`handleAddPortfolio`:** Saves custom portfolio names in `localStorage` (`alphatrader_custom_portfolios`) so empty portfolios persist across page refreshes.
+   - **`handleDeletePortfolio` / `handleRenamePortfolio`:** In Cloud Mode, checks for active trades (to match backend guards) and updates or clears custom mappings in `localStorage`.
+3. **CSV Parsing Integration:** Updated `fetchDirectFromGoogleSheet` to load custom empty portfolios from `localStorage` and override the derived `portfolio` for each asset using the saved `alphatrader_portfolio_mappings`.
+
+**Files Changed:**
+- `frontend/src/App.jsx`
+
+**Commit:** `e75fa92` — `Fix: remove setup screen watermarks and enable cloud mode portfolio transfers/management`
+
