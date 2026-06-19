@@ -270,3 +270,67 @@ Additional improvements in the same fix:
 - **Info text updated** to clearly explain: Sheet ID = read access, Apps Script URL = write access.
 
 **Commit:** `52dc942` — `Fix onboarding guard: use isConnected state (localStorage) not typing state to prevent premature dashboard redirect`
+
+---
+
+### [2026-06-19] — Fix: Deleting a Trade Removes the Wrong Row
+
+**Symptom:** On the mobile app (Cloud Mode), deleting a trade removed a completely different trade from the Google Sheet. For example, trying to delete CPALL (added 19 Jun 2026) instead deleted MSTR (4 Jun 2026) and ROJNA (29 May 2026). The newly added trade (CPALL) could not be deleted at all.
+
+**Root Cause — Off-by-1 ID Mismatch:**
+
+Trade IDs are assigned as the data-row loop index `i` (starting at 1), but `deleteTrade` passes that value directly to `sheet.deleteRow()`, which expects the **actual spreadsheet row number** (header occupies row 1, so data starts at row 2):
+
+```
+Sheet Layout:
+  Row 1  → Header (Timestamp, Date, Asset Name, ...)
+  Row 2  → Trade 1 (BJC)
+  Row 3  → Trade 2 (KCE)
+  ...
+  Row 12 → Trade 11 (CPALL — newly added)
+
+OLD (broken) ID assignment in getDashboardData:
+  i = 1 → id = "1"   (but actual sheet row = 2)
+  i = 11 → id = "11" (but actual sheet row = 12)
+
+OLD deleteTrade("11"):
+  sheet.deleteRow(11) → deletes sheet row 11 = MSTR, NOT CPALL ❌
+
+OLD deleteTrade("1"):
+  sheet.deleteRow(1) → deletes the HEADER ROW ❌
+```
+
+**Fix Applied:**
+
+Changed the ID scheme so that **ID = actual spreadsheet row number** across all three locations:
+
+| Location | Old | New |
+|---|---|---|
+| `fetchDirectFromGoogleSheet` (App.jsx) | `id: i.toString()` | `id: (i + 1).toString()` |
+| `getDashboardData` (Apps Script) | `id: i.toString()` | `id: (i + 1).toString()` |
+| `deleteTrade` guard (Apps Script) | `rowIdx > 0` | `rowIdx > 1` (never delete header row 1) |
+
+```javascript
+// FIXED — getDashboardData (Apps Script & CSV parser):
+// i starts at 1 (loop skips header), so sheet row = i + 1
+id: (i + 1).toString()
+// BJC at i=1 → id="2" = actual sheet row 2 ✅
+
+// FIXED — deleteTrade (Apps Script):
+// ID now IS the sheet row number, pass directly to deleteRow()
+function deleteTrade(tradeId) {
+  var rowIdx = parseInt(tradeId);  // e.g. "12" → 12
+  if (rowIdx > 1 && rowIdx <= sheet.getLastRow()) {
+    sheet.deleteRow(rowIdx);       // deletes correct row ✅
+  }
+}
+```
+
+**Files Changed:**
+- `frontend/src/App.jsx` — `fetchDirectFromGoogleSheet`: `id: i.toString()` → `id: (i + 1).toString()`
+- `github_sheets_serverless_deployment_guide.md` — Apps Script `getDashboardData` and `deleteTrade` functions updated
+
+> [!IMPORTANT]
+> The Apps Script code inside Google's cloud editor must also be updated manually by the user (copy from `github_sheets_serverless_deployment_guide.md` → paste into [script.google.com](https://script.google.com) → Save → Re-deploy). The frontend fix alone is not enough for delete to work correctly.
+
+**Commit:** `8bc94df` — `Fix delete wrong trade bug: ID now equals actual sheet row number, fixes off-by-1 in deleteTrade`
