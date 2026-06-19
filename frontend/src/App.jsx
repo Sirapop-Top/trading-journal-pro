@@ -302,7 +302,7 @@ function App() {
       const price = priceUnitIdx !== -1 ? parseFloat(row[priceUnitIdx]) : 0;
       
       loadedTrades.push({
-        id: i.toString(),
+        id: (i + 1).toString(),   // ID = actual spreadsheet row number (header=row1, data starts at row2)
         date: dateVal,
         portfolio,
         assetName,

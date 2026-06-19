@@ -194,7 +194,7 @@ function getDashboardData() {
     if (isNaN(price)) price = 0;
     
     var trade = {
-      id: i.toString(), // Use row index as ID (row 2 -> ID "2")
+      id: (i + 1).toString(), // ID = actual sheet row number (header=row1, data row i=1 → row 2 → ID "2")
       date: dateVal,
       portfolio: portfolio,
       assetName: assetName,
@@ -378,13 +378,18 @@ function getColumnLetter(colIdx) {
 
 function deleteTrade(tradeId) {
   var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Journal");
+  // tradeId is the actual spreadsheet row number (e.g. "2" = first data row after header).
+  // getDashboardData assigns id = (i + 1).toString() where i starts at 1,
+  // so the first data row (sheet row 2) gets id "2", not "1".
   var rowIdx = parseInt(tradeId);
+  var lastRow = sheet.getLastRow();
   
-  if (rowIdx > 0 && rowIdx <= sheet.getLastRow()) {
+  // rowIdx must be > 1 (never delete header row 1) and within bounds
+  if (rowIdx > 1 && rowIdx <= lastRow) {
     sheet.deleteRow(rowIdx);
-    return { success: true };
+    return { success: true, deletedRow: rowIdx };
   }
   
-  return { success: false, error: "Row index out of range" };
+  return { success: false, error: "Row index out of range: " + rowIdx + " (lastRow=" + lastRow + ")" };
 }
 ```
