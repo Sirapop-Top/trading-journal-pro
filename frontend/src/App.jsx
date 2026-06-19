@@ -276,6 +276,14 @@ function App() {
     const loadedTrades = [];
     const loadedPortfolios = new Set(["Main Trading", "BTC Stock", "Crypto"]);
     
+    // Load custom empty portfolios from localStorage in Cloud Mode
+    try {
+      const customPortfolios = JSON.parse(localStorage.getItem('alphatrader_custom_portfolios') || '[]');
+      customPortfolios.forEach(p => loadedPortfolios.add(p));
+    } catch (e) {
+      console.error("Error loading custom portfolios:", e);
+    }
+    
     for (let i = 1; i < rows.length; i++) {
       const row = rows[i];
       const assetName = assetNameIdx !== -1 && row[assetNameIdx] ? row[assetNameIdx].toString().trim() : "";
@@ -296,6 +304,16 @@ function App() {
         portfolio = "Crypto";
       } else if (assetType.toLowerCase() === "global stock" || assetType.toLowerCase() === "us stock") {
         portfolio = "BTC Stock";
+      }
+      
+      // Apply custom overrides from localStorage in Cloud Mode
+      try {
+        const customMappings = JSON.parse(localStorage.getItem('alphatrader_portfolio_mappings') || '{}');
+        if (customMappings[assetName]) {
+          portfolio = customMappings[assetName];
+        }
+      } catch (e) {
+        console.error("Error loading portfolio mapping for asset:", e);
       }
       
       const qty = quantityIdx !== -1 ? parseFloat(row[quantityIdx]) : 0;
@@ -949,6 +967,16 @@ function App() {
         setIsTradeModalOpen(false);
         tradeForm.resetFields();
         setTickerValidation({ status: 'idle', message: '', checkedTicker: '' });
+        
+        // Auto-save the portfolio mapping for this asset in Cloud Mode
+        try {
+          const customMappings = JSON.parse(localStorage.getItem('alphatrader_portfolio_mappings') || '{}');
+          customMappings[newTrade.assetName] = newTrade.portfolio;
+          localStorage.setItem('alphatrader_portfolio_mappings', JSON.stringify(customMappings));
+        } catch (e) {
+          console.error("Error saving portfolio mapping:", e);
+        }
+
         setTrades(prev => [...prev, newTrade]);
         fetchData(); // Trigger full refresh to sync
       } else {
@@ -999,8 +1027,20 @@ function App() {
     try {
       const api = getApiUrl('/api/portfolios');
       if (api.type === 'cloud') {
-        setPortfolios(prev => [...prev, values.name]);
-        message.success(`Portfolio "${values.name}" created (in memory).`);
+        const name = values.name.trim();
+        // Save empty custom portfolio to localStorage in Cloud Mode
+        const customPortfolios = JSON.parse(localStorage.getItem('alphatrader_custom_portfolios') || '[]');
+        if (!customPortfolios.includes(name)) {
+          customPortfolios.push(name);
+          localStorage.setItem('alphatrader_custom_portfolios', JSON.stringify(customPortfolios));
+        }
+        setPortfolios(prev => {
+          if (!prev.includes(name)) {
+            return [...prev, name];
+          }
+          return prev;
+        });
+        message.success(`Portfolio "${name}" created.`);
         setIsPortfolioModalOpen(false);
         portfolioForm.resetFields();
       } else {
@@ -1019,12 +1059,48 @@ function App() {
   // Delete portfolio
   const handleDeletePortfolio = async (portfolioName) => {
     try {
-      const response = await axios.delete(`${API_BASE}/api/portfolios/${portfolioName}`);
-      setPortfolios(response.data.portfolios);
-      if (activePortfolio === portfolioName) {
-        setActivePortfolio('All Portfolios');
+      const api = getApiUrl(`/api/portfolios/${portfolioName}`);
+      if (api.type === 'cloud') {
+        // Validation: check if portfolio has any active trades in Cloud Mode
+        const hasTrades = trades.some(t => t.portfolio === portfolioName);
+        if (hasTrades) {
+          message.error("Cannot delete portfolio with existing trades. Please reassign or delete the trades first.");
+          return;
+        }
+
+        // Delete from custom portfolios in localStorage
+        const customPortfolios = JSON.parse(localStorage.getItem('alphatrader_custom_portfolios') || '[]');
+        const updatedCustomPortfolios = customPortfolios.filter(p => p !== portfolioName);
+        localStorage.setItem('alphatrader_custom_portfolios', JSON.stringify(updatedCustomPortfolios));
+
+        // Delete custom mapping overrides for this portfolio
+        const customMappings = JSON.parse(localStorage.getItem('alphatrader_portfolio_mappings') || '{}');
+        let changed = false;
+        for (const asset in customMappings) {
+          if (customMappings[asset] === portfolioName) {
+            delete customMappings[asset];
+            changed = true;
+          }
+        }
+        if (changed) {
+          localStorage.setItem('alphatrader_portfolio_mappings', JSON.stringify(customMappings));
+        }
+
+        // Update active selection and portfolios list in state
+        setPortfolios(prev => prev.filter(p => p !== portfolioName));
+        if (activePortfolio === portfolioName) {
+          setActivePortfolio('All Portfolios');
+        }
+        message.success(`Portfolio "${portfolioName}" deleted.`);
+        await fetchData();
+      } else {
+        const response = await axios.delete(`${API_BASE}/api/portfolios/${portfolioName}`);
+        setPortfolios(response.data.portfolios);
+        if (activePortfolio === portfolioName) {
+          setActivePortfolio('All Portfolios');
+        }
+        message.success(`Portfolio "${portfolioName}" deleted.`);
       }
-      message.success(`Portfolio "${portfolioName}" deleted.`);
     } catch (error) {
       console.error('Error deleting portfolio:', error);
       message.error(error.response?.data?.detail || 'Failed to delete portfolio.');
@@ -1034,18 +1110,58 @@ function App() {
   // Rename portfolio
   const handleRenamePortfolio = async (values) => {
     try {
-      const response = await axios.put(`${API_BASE}/api/portfolios/rename`, {
-        oldName: renameTarget,
-        newName: values.name.trim()
-      });
-      setPortfolios(response.data.portfolios);
-      await fetchData();
-      if (activePortfolio === renameTarget) {
-        setActivePortfolio(values.name.trim());
+      const api = getApiUrl('/api/portfolios/rename');
+      const oldName = renameTarget;
+      const newName = values.name.trim();
+      
+      if (oldName === newName) {
+        message.error("New name must be different from the old name.");
+        return;
       }
-      message.success(`Portfolio renamed successfully to "${values.name.trim()}".`);
-      setIsRenameModalOpen(false);
-      renameForm.resetFields();
+
+      if (api.type === 'cloud') {
+        // Update custom portfolios in localStorage
+        const customPortfolios = JSON.parse(localStorage.getItem('alphatrader_custom_portfolios') || '[]');
+        const updatedCustomPortfolios = customPortfolios.map(p => p === oldName ? newName : p);
+        localStorage.setItem('alphatrader_custom_portfolios', JSON.stringify(updatedCustomPortfolios));
+
+        // Update custom mappings in localStorage
+        const customMappings = JSON.parse(localStorage.getItem('alphatrader_portfolio_mappings') || '{}');
+        let changed = false;
+        for (const asset in customMappings) {
+          if (customMappings[asset] === oldName) {
+            customMappings[asset] = newName;
+            changed = true;
+          }
+        }
+        if (changed) {
+          localStorage.setItem('alphatrader_portfolio_mappings', JSON.stringify(customMappings));
+        }
+
+        // Update state
+        setPortfolios(prev => prev.map(p => p === oldName ? newName : p));
+        if (activePortfolio === oldName) {
+          setActivePortfolio(newName);
+        }
+
+        message.success(`Portfolio renamed successfully to "${newName}".`);
+        setIsRenameModalOpen(false);
+        renameForm.resetFields();
+        await fetchData();
+      } else {
+        const response = await axios.put(`${API_BASE}/api/portfolios/rename`, {
+          oldName: oldName,
+          newName: newName
+        });
+        setPortfolios(response.data.portfolios);
+        await fetchData();
+        if (activePortfolio === oldName) {
+          setActivePortfolio(newName);
+        }
+        message.success(`Portfolio renamed successfully to "${newName}".`);
+        setIsRenameModalOpen(false);
+        renameForm.resetFields();
+      }
     } catch (error) {
       console.error('Error renaming portfolio:', error);
       message.error(error.response?.data?.detail || 'Failed to rename portfolio.');
@@ -1055,14 +1171,28 @@ function App() {
   // Transfer whole position trades to another portfolio
   const handleTransferPosition = async (values) => {
     try {
-      const response = await axios.put(`${API_BASE}/api/portfolios/transfer-position`, {
-        assetName: transferTargetAsset,
-        sourcePortfolio: transferSourcePortfolio,
-        targetPortfolio: values.targetPortfolio
-      });
-      message.success(response.data.message);
-      setIsTransferModalOpen(false);
-      await fetchData();
+      const api = getApiUrl('/api/portfolios/transfer-position');
+      const targetPortfolio = values.targetPortfolio;
+      
+      if (api.type === 'cloud') {
+        // Save portfolio override mapping for this asset in localStorage
+        const customMappings = JSON.parse(localStorage.getItem('alphatrader_portfolio_mappings') || '{}');
+        customMappings[transferTargetAsset] = targetPortfolio;
+        localStorage.setItem('alphatrader_portfolio_mappings', JSON.stringify(customMappings));
+
+        message.success(`Successfully transferred ${transferTargetAsset} position to '${targetPortfolio}'.`);
+        setIsTransferModalOpen(false);
+        await fetchData();
+      } else {
+        const response = await axios.put(`${API_BASE}/api/portfolios/transfer-position`, {
+          assetName: transferTargetAsset,
+          sourcePortfolio: transferSourcePortfolio,
+          targetPortfolio: targetPortfolio
+        });
+        message.success(response.data.message);
+        setIsTransferModalOpen(false);
+        await fetchData();
+      }
     } catch (error) {
       console.error('Error transferring position:', error);
       message.error(error.response?.data?.detail || 'Failed to transfer position.');
@@ -1506,7 +1636,7 @@ function App() {
                   1. Paste Google Sheet ID: <span style={{ color: '#f43f5e' }}>*</span>
                 </strong>
                 <Input 
-                  placeholder="e.g. 1kUYZcvNnbw-ihbPFkr4xbGHW3597UKC-n9B1jnS2djs"
+                  placeholder=""
                   value={googleSheetId}
                   onChange={(e) => setGoogleSheetId(e.target.value)}
                   style={{ width: '100%', borderRadius: '4px', marginBottom: '16px' }}
@@ -1516,7 +1646,7 @@ function App() {
                   2. Paste Apps Script URL: <span style={{ color: 'var(--text-secondary)', fontWeight: 400, fontSize: '12px' }}>(optional — needed for writing trades from mobile)</span>
                 </strong>
                 <Input.Password
-                  placeholder="https://script.google.com/macros/s/.../exec"
+                  placeholder=""
                   value={googleAppsScriptUrl}
                   onChange={(e) => setGoogleAppsScriptUrl(e.target.value)}
                   style={{ width: '100%', borderRadius: '4px' }}
@@ -3240,7 +3370,7 @@ function App() {
                         <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
                           <strong style={{ color: '#ffffff', minWidth: '160px' }}>Google Sheet ID (Read):</strong>
                           <Input 
-                            placeholder="e.g. 1A2B3C4D..." 
+                            placeholder="" 
                             value={googleSheetId} 
                             onChange={(e) => setGoogleSheetId(e.target.value)} 
                             style={{ maxWidth: '400px', flex: 1 }}
@@ -3250,7 +3380,7 @@ function App() {
                         <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
                           <strong style={{ color: '#ffffff', minWidth: '160px' }}>Apps Script URL (Write):</strong>
                           <Input 
-                            placeholder="e.g. https://script.google.com/macros/s/.../exec" 
+                            placeholder="" 
                             value={googleAppsScriptUrl} 
                             onChange={(e) => setGoogleAppsScriptUrl(e.target.value)} 
                             style={{ maxWidth: '400px', flex: 1 }}
