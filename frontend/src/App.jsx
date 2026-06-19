@@ -47,10 +47,10 @@ const getApiUrl = (endpoint) => {
   const scriptUrl = localStorage.getItem('google_apps_script_url');
   const useCloud = isCloudMode || !window.location.hostname;
   
-  if (useCloud && scriptUrl) {
-    return { type: 'cloud', url: scriptUrl };
+  if (useCloud) {
+    return { type: 'cloud', url: scriptUrl || '' }; // Always cloud on GitHub Pages; url may be empty
   }
-  return { type: 'local', url: `${API_BASE}${endpoint}` };
+  return { type: 'local', url: `${API_BASE}${endpoint}` }; // Routes to local FastAPI Backend
 };
 
 // Robust RFC 4180-compliant CSV Parser that handles nested quotes, commas, and newlines
@@ -342,29 +342,29 @@ function App() {
     try {
       const api = getApiUrl('/api/data');
       if (api.type === 'cloud') {
+        // In Cloud Mode: always use the direct CSV URL as the PRIMARY source for trade data.
+        // The gviz/tq CSV endpoint has full CORS support and never redirects,
+        // so it works on ALL browsers including Safari/Brave on mobile.
+        // Apps Script is only used as a fallback to also fetch live prices.
+        const sheetId = localStorage.getItem('google_sheet_id') || googleSheetId;
+        if (!sheetId) {
+          setCloudConnectionError('No Google Sheet ID configured. Please enter your Sheet ID in the setup screen.');
+          setIsSyncing(false);
+          return;
+        }
+        // Step 1: Load trades from the guaranteed-CORS CSV endpoint
+        await fetchDirectFromGoogleSheet(sheetId);
+        // Step 2: Try to also get live prices from Apps Script (non-critical, best-effort)
         try {
-          const data = await callGoogleAppsScript(`${api.url}?action=getData`);
-          if (!data || !data.trades) {
-            throw new Error("Empty or malformed JSON returned from Web App");
+          const scriptUrl = localStorage.getItem('google_apps_script_url');
+          if (scriptUrl) {
+            const data = await callGoogleAppsScript(`${scriptUrl}?action=getData`);
+            if (data && data.livePrices) setLivePrices(data.livePrices);
+            if (data && data.liveRates) setLiveRates(data.liveRates);
           }
-          setTrades(data.trades);
-          setPortfolios(data.portfolios || ["Main Trading", "BTC Stock", "Crypto"]);
-          setLivePrices(data.livePrices || {});
-          setLiveRates(data.liveRates || { THB: 1.0, USD: 32.69, EUR: 38.04 });
-          setGoogleSheetSyncCount(data.trades.length);
-          if (data.syncTime) {
-            setSyncTime(dayjs(data.syncTime).format('YYYY-MM-DD HH:mm:ss'));
-          }
-        } catch (cloudErr) {
-          console.error("Failed to load via Apps Script API, trying CSV fallback:", cloudErr);
-          const sheetId = localStorage.getItem('google_sheet_id') || googleSheetId;
-          if (sheetId) {
-            setCloudConnectionError(`${cloudErr.message || String(cloudErr)} (Using direct Google Sheet CSV Read fallback)`);
-            await fetchDirectFromGoogleSheet(sheetId);
-          } else {
-            setCloudConnectionError(cloudErr.message || String(cloudErr));
-            throw cloudErr;
-          }
+        } catch (priceErr) {
+          // Live prices are optional — don't block or error if this fails
+          console.warn('Live prices from Apps Script unavailable, using WAC fallback:', priceErr);
         }
       } else {
         const response = await axios.get(api.url);
@@ -378,7 +378,7 @@ function App() {
       }
     } catch (error) {
       console.error('Error fetching data:', error);
-      message.error('Failed to load dashboard data. Using local fallbacks.');
+      message.error('Failed to load data. Check your Google Sheet ID is correct and the sheet is shared publicly.');
     } finally {
       setIsSyncing(false);
     }
@@ -1466,7 +1466,9 @@ function App() {
 
   // If we are in cloud mode and the Google Apps Script URL has not been configured in this browser yet,
   // show the initial onboarding/setup screen to link the Google Sheet.
-  if (isCloudMode && !googleAppsScriptUrl) {
+  // Show onboarding only if BOTH Sheet ID and Apps Script URL are missing
+  // (Sheet ID alone is enough to read trades via the CSV fallback)
+  if (isCloudMode && !googleSheetId && !googleAppsScriptUrl) {
     return (
       <ConfigProvider
         theme={{
