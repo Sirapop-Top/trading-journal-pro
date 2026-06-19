@@ -94,13 +94,11 @@ function doGet(e) {
   
   if (action === "getData") {
     return ContentService.createTextOutput(JSON.stringify(getDashboardData()))
-      .setMimeType(ContentService.MimeType.JSON)
-      .setHeader("Access-Control-Allow-Origin", "*");
+      .setMimeType(ContentService.MimeType.JSON);
   }
   
   return ContentService.createTextOutput(JSON.stringify({ error: "Invalid action" }))
-    .setMimeType(ContentService.MimeType.JSON)
-    .setHeader("Access-Control-Allow-Origin", "*");
+    .setMimeType(ContentService.MimeType.JSON);
 }
 
 function doPost(e) {
@@ -109,18 +107,15 @@ function doPost(e) {
   
   if (action === "addTrade") {
     return ContentService.createTextOutput(JSON.stringify(addTrade(contents.trade)))
-      .setMimeType(ContentService.MimeType.JSON)
-      .setHeader("Access-Control-Allow-Origin", "*");
+      .setMimeType(ContentService.MimeType.JSON);
   } else if (action === "deleteTrade") {
     return ContentService.createTextOutput(JSON.stringify(deleteTrade(contents.tradeId)))
-      .setMimeType(ContentService.MimeType.JSON)
-      .setHeader("Access-Control-Allow-Origin", "*");
+      .setMimeType(ContentService.MimeType.JSON);
   }
   
   // Fallback for legacy direct form uploads
   return ContentService.createTextOutput(JSON.stringify(addTrade(contents)))
-    .setMimeType(ContentService.MimeType.JSON)
-    .setHeader("Access-Control-Allow-Origin", "*");
+    .setMimeType(ContentService.MimeType.JSON);
 }
 
 function getDashboardData() {
