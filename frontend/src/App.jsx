@@ -53,6 +53,48 @@ const getApiUrl = (endpoint) => {
   return { type: 'local', url: `${API_BASE}${endpoint}` };
 };
 
+// Robust RFC 4180-compliant CSV Parser that handles nested quotes, commas, and newlines
+const parseCSV = (csvText) => {
+  const lines = [];
+  let currentLine = [];
+  let currentVal = '';
+  let inQuotes = false;
+  
+  for (let i = 0; i < csvText.length; i++) {
+    const char = csvText[i];
+    const nextChar = csvText[i + 1];
+    
+    if (char === '"') {
+      if (inQuotes && nextChar === '"') {
+        currentVal += '"';
+        i++; // skip next escaped quote
+      } else {
+        inQuotes = !inQuotes;
+      }
+    } else if (char === ',' && !inQuotes) {
+      currentLine.push(currentVal.trim());
+      currentVal = '';
+    } else if ((char === '\r' || char === '\n') && !inQuotes) {
+      if (char === '\r' && nextChar === '\n') {
+        i++;
+      }
+      currentLine.push(currentVal.trim());
+      if (currentLine.length > 1 || currentLine[0] !== '') {
+        lines.push(currentLine);
+      }
+      currentLine = [];
+      currentVal = '';
+    } else {
+      currentVal += char;
+    }
+  }
+  if (currentVal || currentLine.length > 0) {
+    currentLine.push(currentVal.trim());
+    lines.push(currentLine);
+  }
+  return lines;
+};
+
 // Helper to communicate with Google Apps Script without triggering CORS preflight (OPTIONS) requests
 const callGoogleAppsScript = async (url, payload = null) => {
   if (payload) {
@@ -61,7 +103,8 @@ const callGoogleAppsScript = async (url, payload = null) => {
       headers: {
         'Content-Type': 'text/plain;charset=utf-8'
       },
-      body: JSON.stringify(payload)
+      body: JSON.stringify(payload),
+      redirect: 'follow'
     });
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`);
@@ -69,7 +112,8 @@ const callGoogleAppsScript = async (url, payload = null) => {
     return await response.json();
   } else {
     const response = await fetch(url, {
-      method: 'GET'
+      method: 'GET',
+      redirect: 'follow'
     });
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`);
@@ -141,10 +185,11 @@ function App() {
   const [autoRefresh, setAutoRefresh] = useState(true);
   
   // Google Sheet Mobile Sync State
-  const [googleSheetId, setGoogleSheetId] = useState('');
+  const [googleSheetId, setGoogleSheetId] = useState(() => localStorage.getItem('google_sheet_id') || '');
   const [isSyncingSheet, setIsSyncingSheet] = useState(false);
   const [googleSheetSyncCount, setGoogleSheetSyncCount] = useState(0);
   const [googleAppsScriptUrl, setGoogleAppsScriptUrl] = useState(() => localStorage.getItem('google_apps_script_url') || '');
+  const [cloudConnectionError, setCloudConnectionError] = useState(null);
 
   
   // Modals & Forms
@@ -187,19 +232,139 @@ function App() {
     };
   }, [autoRefresh, trades]);
 
+  // Helper to fetch Google Sheet directly via CSV (CORS-friendly fallback)
+  const fetchDirectFromGoogleSheet = async (sheetId) => {
+    const csvUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&sheet=Journal`;
+    const response = await fetch(csvUrl);
+    if (!response.ok) {
+      throw new Error(`Google Sheets responded with HTTP status ${response.status}`);
+    }
+    const csvText = await response.text();
+    const rows = parseCSV(csvText);
+    
+    if (rows.length <= 1) {
+      setTrades([]);
+      setGoogleSheetSyncCount(0);
+      return;
+    }
+    
+    const headers = rows[0].map(h => h.toString().toLowerCase().trim());
+    
+    const findColIdx = (keywords) => {
+      for (let i = 0; i < headers.length; i++) {
+        const h = headers[i];
+        for (const k of keywords) {
+          if (h.indexOf(k) !== -1) return i;
+        }
+      }
+      return -1;
+    };
+    
+    const dateIdx = findColIdx(["date"]);
+    const assetNameIdx = findColIdx(["asset name", "asset_name", "asset"]);
+    const assetTypeIdx = findColIdx(["asset type", "asset_type", "type"]);
+    const currencyIdx = findColIdx(["currency"]);
+    const actionIdx = findColIdx(["action"]);
+    const quantityIdx = findColIdx(["quantity", "qty"]);
+    const priceUnitIdx = findColIdx(["price/unit", "price_unit", "price unit", "price"]);
+    const whyIdx = findColIdx(["why", "decision", "reason"]);
+    const remarkIdx = findColIdx(["remark", "note"]);
+    
+    const loadedTrades = [];
+    const loadedPortfolios = new Set(["Main Trading", "BTC Stock", "Crypto"]);
+    
+    for (let i = 1; i < rows.length; i++) {
+      const row = rows[i];
+      const assetName = assetNameIdx !== -1 && row[assetNameIdx] ? row[assetNameIdx].toString().trim() : "";
+      if (!assetName) continue;
+      
+      let dateVal = "";
+      if (dateIdx !== -1 && row[dateIdx]) {
+        const d = row[dateIdx].toString().trim();
+        dateVal = dayjs(d).isValid() ? dayjs(d).format("YYYY-MM-DD") : d;
+      } else {
+        dateVal = dayjs().format("YYYY-MM-DD");
+      }
+      
+      const assetType = assetTypeIdx !== -1 && row[assetTypeIdx] ? row[assetTypeIdx].toString().trim() : "";
+      
+      let portfolio = "Main Trading";
+      if (assetType.toLowerCase() === "crypto") {
+        portfolio = "Crypto";
+      } else if (assetType.toLowerCase() === "global stock" || assetType.toLowerCase() === "us stock") {
+        portfolio = "BTC Stock";
+      }
+      
+      const qty = quantityIdx !== -1 ? parseFloat(row[quantityIdx]) : 0;
+      const price = priceUnitIdx !== -1 ? parseFloat(row[priceUnitIdx]) : 0;
+      
+      loadedTrades.push({
+        id: i.toString(),
+        date: dateVal,
+        portfolio,
+        assetName,
+        assetType,
+        currency: currencyIdx !== -1 && row[currencyIdx] ? row[currencyIdx].toString().trim() : "THB",
+        action: actionIdx !== -1 && row[actionIdx] ? row[actionIdx].toString().trim() : "Buy",
+        quantity: isNaN(qty) ? 0 : qty,
+        priceUnit: isNaN(price) ? 0 : price,
+        why: whyIdx !== -1 && row[whyIdx] ? row[whyIdx].toString().trim() : "",
+        remark: remarkIdx !== -1 && row[remarkIdx] ? row[remarkIdx].toString().trim() : ""
+      });
+      
+      loadedPortfolios.add(portfolio);
+    }
+    
+    setTrades(loadedTrades);
+    setPortfolios(Array.from(loadedPortfolios));
+    setGoogleSheetSyncCount(loadedTrades.length);
+    
+    // Attempt live exchange rates fetch via a free CORS-enabled API
+    try {
+      const rateRes = await fetch("https://open.er-api.com/v6/latest/USD");
+      if (rateRes.ok) {
+        const rateData = await rateRes.json();
+        const usdToThb = rateData.rates.THB || 32.69;
+        const eurToThb = rateData.rates.THB / rateData.rates.EUR || 38.04;
+        setLiveRates({ THB: 1.0, USD: usdToThb, EUR: eurToThb });
+      }
+    } catch (rateErr) {
+      console.error("Live rates API fallback error:", rateErr);
+    }
+    
+    setSyncTime(dayjs().format('YYYY-MM-DD HH:mm:ss'));
+  };
+
   // Fetch all trades, portfolios, prices, and rates
   const fetchData = async () => {
     setIsSyncing(true);
+    setCloudConnectionError(null);
     try {
       const api = getApiUrl('/api/data');
       if (api.type === 'cloud') {
-        const data = await callGoogleAppsScript(`${api.url}?action=getData`);
-        setTrades(data.trades);
-        setPortfolios(data.portfolios);
-        setLivePrices(data.livePrices || {});
-        setLiveRates(data.liveRates || { THB: 1.0, USD: 32.69, EUR: 38.04 });
-        if (data.syncTime) {
-          setSyncTime(dayjs(data.syncTime).format('YYYY-MM-DD HH:mm:ss'));
+        try {
+          const data = await callGoogleAppsScript(`${api.url}?action=getData`);
+          if (!data || !data.trades) {
+            throw new Error("Empty or malformed JSON returned from Web App");
+          }
+          setTrades(data.trades);
+          setPortfolios(data.portfolios || ["Main Trading", "BTC Stock", "Crypto"]);
+          setLivePrices(data.livePrices || {});
+          setLiveRates(data.liveRates || { THB: 1.0, USD: 32.69, EUR: 38.04 });
+          setGoogleSheetSyncCount(data.trades.length);
+          if (data.syncTime) {
+            setSyncTime(dayjs(data.syncTime).format('YYYY-MM-DD HH:mm:ss'));
+          }
+        } catch (cloudErr) {
+          console.error("Failed to load via Apps Script API, trying CSV fallback:", cloudErr);
+          const sheetId = localStorage.getItem('google_sheet_id') || googleSheetId;
+          if (sheetId) {
+            setCloudConnectionError(`${cloudErr.message || String(cloudErr)} (Using direct Google Sheet CSV Read fallback)`);
+            await fetchDirectFromGoogleSheet(sheetId);
+          } else {
+            setCloudConnectionError(cloudErr.message || String(cloudErr));
+            throw cloudErr;
+          }
         }
       } else {
         const response = await axios.get(api.url);
@@ -257,6 +422,10 @@ function App() {
 
   // Google Sheet Mobile Sync Helper API Functions
   const fetchGoogleSheetSettings = async () => {
+    if (isCloudMode) {
+      setGoogleSheetSyncCount(trades.length);
+      return;
+    }
     try {
       const response = await axios.get(`${API_BASE}/api/google-sheet-settings`);
       setGoogleSheetId(response.data.google_sheet_id || '');
@@ -1329,7 +1498,17 @@ function App() {
             <Space direction="vertical" size="middle" style={{ width: '100%' }}>
               <div style={{ background: '#0b0e17', border: '1px solid #1f293d', padding: '16px', borderRadius: '8px' }}>
                 <strong style={{ color: '#ffffff', display: 'block', marginBottom: '8px', fontSize: '14px' }}>
-                  Paste Google Apps Script URL:
+                  1. Paste Google Sheet ID (Read Access):
+                </strong>
+                <Input 
+                  placeholder="e.g. 1kUYZcvNnbw-ihbPFkr4xbGHW3597UKC-n9B1jnS2djs"
+                  value={googleSheetId}
+                  onChange={(e) => setGoogleSheetId(e.target.value)}
+                  style={{ width: '100%', borderRadius: '4px', marginBottom: '12px' }}
+                />
+
+                <strong style={{ color: '#ffffff', display: 'block', marginBottom: '8px', fontSize: '14px' }}>
+                  2. Paste Google Apps Script Web App URL (Write Access):
                 </strong>
                 <Input.Password
                   placeholder="https://script.google.com/macros/s/.../exec"
@@ -1345,11 +1524,16 @@ function App() {
                 size="large"
                 style={{ fontWeight: 'bold', color: '#06080f' }}
                 onClick={() => {
+                  if (!googleSheetId.trim()) {
+                    message.error('Please enter your Google Sheet ID.');
+                    return;
+                  }
                   if (!googleAppsScriptUrl.trim().startsWith('https://script.google.com')) {
                     message.error('Invalid Apps Script URL. Please copy the URL from your deployment.');
                     return;
                   }
                   localStorage.setItem('google_apps_script_url', googleAppsScriptUrl.trim());
+                  localStorage.setItem('google_sheet_id', googleSheetId.trim());
                   message.success('Successfully connected to your journal!');
                   fetchData(); // Trigger load
                 }}
@@ -1611,6 +1795,44 @@ function App() {
           {/* Content Area */}
           <Content style={{ padding: isMobile ? '12px 10px 80px 10px' : '24px', minHeight: 280, overflowY: 'auto' }}>
             <Spin spinning={isSyncing && trades.length === 0} tip="Syncing Terminal Feed...">
+              {cloudConnectionError && (
+                <Alert
+                  message={<strong>Cloud Sync Connection Blocked</strong>}
+                  description={
+                    <div style={{ fontSize: '13px' }}>
+                      <p style={{ margin: '0 0 8px 0' }}>
+                        AlphaTrader was unable to fetch data from your Google Apps Script Web App: <code>{cloudConnectionError}</code>
+                      </p>
+                      <p style={{ margin: '0 0 8px 0' }}>
+                        If this is a CORS/tracking blocker error, you can disable tracking protection for this page, or open the link in Incognito/Private mode. We have loaded a <strong>read-only direct Google Sheet fallback</strong> so you can still view your portfolio metrics, trades, and balance!
+                      </p>
+                      <div style={{ display: 'flex', gap: '10px' }}>
+                        <Button 
+                          size="small" 
+                          type="primary" 
+                          ghost 
+                          onClick={() => {
+                            localStorage.removeItem('google_apps_script_url');
+                            localStorage.removeItem('google_sheet_id');
+                            window.location.reload();
+                          }}
+                        >
+                          Reset Cloud Connection Settings
+                        </Button>
+                        <Button 
+                          size="small" 
+                          onClick={() => fetchData()}
+                        >
+                          Retry Connection
+                        </Button>
+                      </div>
+                    </div>
+                  }
+                  type="warning"
+                  showIcon
+                  style={{ marginBottom: '16px', border: '1px solid rgba(250, 173, 20, 0.2)', background: 'rgba(250, 173, 20, 0.05)' }}
+                />
+              )}
               
               {/* 1. DASHBOARD PAGE - MOBILE */}
               {activeTab === 'dashboard' && isMobile && (
