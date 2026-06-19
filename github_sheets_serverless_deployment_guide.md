@@ -131,17 +131,40 @@ function getDashboardData() {
   var portfolios = ["Main Trading", "BTC Stock", "Crypto"];
   var uniqueAssets = [];
   
+  if (rows.length <= 1) {
+    return {
+      trades: [],
+      portfolios: portfolios,
+      livePrices: {},
+      liveRates: { "THB": 1.0, "USD": 35.0, "EUR": 38.0 },
+      syncTime: new Date().toISOString()
+    };
+  }
+  
   var headers = rows[0].map(function(h) { return h.toString().toLowerCase().trim(); });
   
-  var dateIdx = headers.indexOf("date");
-  var assetNameIdx = headers.indexOf("asset name");
-  var assetTypeIdx = headers.indexOf("asset type");
-  var currencyIdx = headers.indexOf("currency");
-  var actionIdx = headers.indexOf("action");
-  var quantityIdx = headers.indexOf("quantity");
-  var priceUnitIdx = headers.indexOf("price/unit");
-  var whyIdx = headers.indexOf("why (decision reason)");
-  var remarkIdx = headers.indexOf("remark");
+  // Helper to find column index matching keywords
+  function findColIdx(keywords) {
+    for (var i = 0; i < headers.length; i++) {
+      var h = headers[i];
+      for (var k = 0; k < keywords.length; k++) {
+        if (h.indexOf(keywords[k]) !== -1) {
+          return i;
+        }
+      }
+    }
+    return -1;
+  }
+  
+  var dateIdx = findColIdx(["date"]);
+  var assetNameIdx = findColIdx(["asset name", "asset_name", "asset"]);
+  var assetTypeIdx = findColIdx(["asset type", "asset_type", "type"]);
+  var currencyIdx = findColIdx(["currency"]);
+  var actionIdx = findColIdx(["action"]);
+  var quantityIdx = findColIdx(["quantity", "qty"]);
+  var priceUnitIdx = findColIdx(["price/unit", "price_unit", "price unit", "price"]);
+  var whyIdx = findColIdx(["why", "decision", "reason"]);
+  var remarkIdx = findColIdx(["remark", "note"]);
   
   for (var i = 1; i < rows.length; i++) {
     var row = rows[i];
@@ -156,29 +179,37 @@ function getDashboardData() {
       if (d instanceof Date) {
         dateVal = Utilities.formatDate(d, Session.getScriptTimeZone(), "yyyy-MM-dd");
       } else {
-        dateVal = d.toString().split(" ")[0];
+        dateVal = d.toString().split(" ")[0].trim();
       }
+    } else {
+      dateVal = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd");
     }
     
     var portfolio = "Main Trading";
     if (assetType.toLowerCase() === "crypto") {
       portfolio = "Crypto";
-    } else if ((assetType.toLowerCase() === "global stock" || assetType.toLowerCase() === "us stock")) {
+    } else if (assetType.toLowerCase() === "global stock" || assetType.toLowerCase() === "us stock") {
       portfolio = "BTC Stock";
     }
     
+    var qty = quantityIdx !== -1 ? parseFloat(row[quantityIdx]) : 0;
+    if (isNaN(qty)) qty = 0;
+    
+    var price = priceUnitIdx !== -1 ? parseFloat(row[priceUnitIdx]) : 0;
+    if (isNaN(price)) price = 0;
+    
     var trade = {
-      id: i.toString(),
+      id: i.toString(), // Use row index as ID (row 2 -> ID "2")
       date: dateVal,
       portfolio: portfolio,
       assetName: assetName,
       assetType: assetType,
-      currency: currencyIdx !== -1 ? row[currencyIdx].toString() : "THB",
-      action: actionIdx !== -1 ? row[actionIdx].toString() : "Buy",
-      quantity: quantityIdx !== -1 ? parseFloat(row[quantityIdx]) || 0 : 0,
-      priceUnit: priceUnitIdx !== -1 ? parseFloat(row[priceUnitIdx]) || 0 : 0,
-      why: whyIdx !== -1 ? row[whyIdx].toString() : "",
-      remark: remarkIdx !== -1 ? row[remarkIdx].toString() : ""
+      currency: currencyIdx !== -1 && row[currencyIdx] ? row[currencyIdx].toString().trim() : "THB",
+      action: actionIdx !== -1 && row[actionIdx] ? row[actionIdx].toString().trim() : "Buy",
+      quantity: qty,
+      priceUnit: price,
+      why: whyIdx !== -1 && row[whyIdx] ? row[whyIdx].toString().trim() : "",
+      remark: remarkIdx !== -1 && row[remarkIdx] ? row[remarkIdx].toString().trim() : ""
     };
     
     trades.push(trade);
@@ -254,22 +285,99 @@ function fetchPriceFromYahoo(asset) {
 
 function addTrade(trade) {
   var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Journal");
+  var lastRow = sheet.getLastRow();
+  var newRowIdx = lastRow + 1;
+  
+  var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  var headersLower = headers.map(function(h) { return h.toString().toLowerCase().trim(); });
+  
+  function writeCell(keywords, value) {
+    for (var i = 0; i < headersLower.length; i++) {
+      var h = headersLower[i];
+      for (var k = 0; k < keywords.length; k++) {
+        if (h.indexOf(keywords[k]) !== -1) {
+          sheet.getRange(newRowIdx, i + 1).setValue(value);
+          return i;
+        }
+      }
+    }
+    return -1;
+  }
+  
   var dateVal = trade.date || Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd");
   
-  sheet.appendRow([
-    new Date(), // Timestamp
-    new Date(dateVal),
-    trade.assetName,
-    trade.assetType,
-    trade.currency,
-    trade.action,
-    trade.quantity,
-    trade.priceUnit,
-    trade.why,
-    trade.remark || ""
-  ]);
+  writeCell(["timestamp"], new Date());
+  writeCell(["date"], new Date(dateVal));
+  writeCell(["asset name", "asset_name", "asset"], trade.assetName);
+  writeCell(["asset type", "asset_type", "type"], trade.assetType);
+  writeCell(["currency"], trade.currency);
+  writeCell(["action"], trade.action);
+  writeCell(["quantity", "qty"], trade.quantity);
+  writeCell(["price/unit", "price_unit", "price unit", "price"], trade.priceUnit);
+  writeCell(["why (decision reason)", "why", "decision", "reason"], trade.why);
+  writeCell(["remark", "note"], trade.remark || "");
+  
+  // Try to write formulas dynamically for computed columns (Amount, Current Value, P&L, etc.)
+  var qtyIdx = findIdxInArray(headersLower, ["quantity", "qty"]);
+  var priceIdx = findIdxInArray(headersLower, ["price/unit", "price_unit", "price unit", "price"]);
+  var curPriceIdx = findIdxInArray(headersLower, ["current price"]);
+  var actionIdx = findIdxInArray(headersLower, ["action"]);
+  var amountIdx = findIdxInArray(headersLower, ["amount"]);
+  var curValueIdx = findIdxInArray(headersLower, ["current value"]);
+  var pnlIdx = findIdxInArray(headersLower, ["p&l"]);
+  var pnlPctIdx = findIdxInArray(headersLower, ["p&l %"]);
+  
+  var qtyLetter = getColumnLetter(qtyIdx + 1);
+  var priceLetter = getColumnLetter(priceIdx + 1);
+  var actionLetter = getColumnLetter(actionIdx + 1);
+  var curPriceLetter = getColumnLetter(curPriceIdx + 1);
+  var amountLetter = getColumnLetter(amountIdx + 1);
+  var pnlLetter = getColumnLetter(pnlIdx + 1);
+
+  if (amountIdx !== -1 && qtyLetter && priceLetter) {
+    sheet.getRange(newRowIdx, amountIdx + 1).setFormula("=" + qtyLetter + newRowIdx + "*" + priceLetter + newRowIdx);
+  }
+  
+  if (curPriceIdx !== -1) {
+    sheet.getRange(newRowIdx, curPriceIdx + 1).setValue(trade.priceUnit); // default live price to purchase price
+  }
+  
+  if (curValueIdx !== -1 && qtyLetter && curPriceLetter) {
+    sheet.getRange(newRowIdx, curValueIdx + 1).setFormula("=" + qtyLetter + newRowIdx + "*" + curPriceLetter + newRowIdx);
+  }
+  
+  if (pnlIdx !== -1 && actionLetter && curPriceLetter && priceLetter && qtyLetter) {
+    sheet.getRange(newRowIdx, pnlIdx + 1).setFormula('=IF(' + actionLetter + newRowIdx + '="Buy",(' + curPriceLetter + newRowIdx + '-' + priceLetter + newRowIdx + ')*' + qtyLetter + newRowIdx + ',(' + priceLetter + newRowIdx + '-' + curPriceLetter + newRowIdx + ')*' + qtyLetter + newRowIdx + ')');
+  }
+  
+  if (pnlPctIdx !== -1 && pnlLetter && amountLetter) {
+    sheet.getRange(newRowIdx, pnlPctIdx + 1).setFormula("=IF(" + amountLetter + newRowIdx + "=0,0," + pnlLetter + newRowIdx + "/" + amountLetter + newRowIdx + ")");
+  }
   
   return { success: true };
+}
+
+function findIdxInArray(array, keywords) {
+  for (var i = 0; i < array.length; i++) {
+    var item = array[i];
+    for (var k = 0; k < keywords.length; k++) {
+      if (item.indexOf(keywords[k]) !== -1) {
+        return i;
+      }
+    }
+  }
+  return -1;
+}
+
+function getColumnLetter(colIdx) {
+  if (colIdx <= 0) return null;
+  var letter = "";
+  while (colIdx > 0) {
+    var temp = (colIdx - 1) % 26;
+    letter = String.fromCharCode(65 + temp) + letter;
+    colIdx = (colIdx - temp - 1) / 26;
+  }
+  return letter;
 }
 
 function deleteTrade(tradeId) {

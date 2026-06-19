@@ -688,10 +688,6 @@ def sync_google_sheet():
         why_idx = find_col_idx(["why", "decision", "reason"])
         remark_idx = find_col_idx(["remark", "note"])
         
-        if timestamp_idx is None:
-            print("[Google Sheet Sync] Error: Could not find 'Timestamp' column in Google Sheet. Make sure it is linked to Google Forms.")
-            return False
-            
         synced_timestamps = db_data.get("synced_google_form_timestamps", [])
         synced_set = set(synced_timestamps)
         
@@ -699,11 +695,19 @@ def sync_google_sheet():
         trades_list = db_data.get("trades", [])
         
         for idx_row, row in df.iterrows():
-            ts_val = row.iloc[timestamp_idx]
-            if pd.isna(ts_val):
-                continue
+            ts_val = row.iloc[timestamp_idx] if timestamp_idx is not None else None
+            
+            # If no timestamp column exists, construct a unique row signature to prevent duplicates
+            if pd.isna(ts_val) or ts_val is None:
+                date_raw = row.iloc[date_idx] if date_idx is not None else ""
+                asset_raw = row.iloc[asset_name_idx] if asset_name_idx is not None else ""
+                action_raw = row.iloc[action_idx] if action_idx is not None else ""
+                qty_raw = row.iloc[quantity_idx] if quantity_idx is not None else 0
+                price_raw = row.iloc[price_unit_idx] if price_unit_idx is not None else 0
+                ts_str = f"sig-{date_raw}-{asset_raw}-{action_raw}-{qty_raw}-{price_raw}".strip()
+            else:
+                ts_str = str(ts_val).strip()
                 
-            ts_str = str(ts_val).strip()
             if ts_str in synced_set:
                 continue
                 
