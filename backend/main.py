@@ -696,6 +696,17 @@ def sync_google_sheet():
         new_trades_count = 0
         trades_list = db_data.get("trades", [])
         
+        # Build a set of existing local trade content signatures to prevent importing duplicates
+        existing_local_sigs = set()
+        for t in trades_list:
+            d = t.get("date", "")
+            a = t.get("assetName", "")
+            act = t.get("action", "")
+            q = t.get("quantity", 0)
+            p = t.get("priceUnit", 0)
+            sig = f"sig-{d}-{a}-{act.capitalize()}-{float(q)}-{float(p)}".strip()
+            existing_local_sigs.add(sig)
+        
         if df.empty:
             print("[Google Sheet Sync] Downloaded spreadsheet is empty. Ready for local-to-cloud initial sync.")
         else:
@@ -732,7 +743,32 @@ def sync_google_sheet():
                 else:
                     ts_str = str(ts_val).strip()
                     
-                if ts_str in synced_set:
+                # Parse date, asset, action, quantity, priceUnit to build the row content signature
+                try:
+                    row_date = ""
+                    raw_date = row.iloc[date_idx] if date_idx is not None else datetime.datetime.now()
+                    if pd.notna(raw_date):
+                        if isinstance(raw_date, (datetime.datetime, datetime.date)):
+                            row_date = raw_date.strftime("%Y-%m-%d")
+                        else:
+                            row_date = str(raw_date).split(" ")[0].strip()
+                    else:
+                        row_date = datetime.datetime.now().strftime("%Y-%m-%d")
+                        
+                    row_asset = str(row.iloc[asset_name_idx]).strip() if asset_name_idx is not None and pd.notna(row.iloc[asset_name_idx]) else ""
+                    row_action = str(row.iloc[action_idx]).strip().capitalize() if action_idx is not None and pd.notna(row.iloc[action_idx]) else "Buy"
+                    row_qty = float(row.iloc[quantity_idx]) if quantity_idx is not None and pd.notna(row.iloc[quantity_idx]) else 0.0
+                    row_price = float(row.iloc[price_unit_idx]) if price_unit_idx is not None and pd.notna(row.iloc[price_unit_idx]) else 0.0
+                    
+                    row_sig = f"sig-{row_date}-{row_asset}-{row_action}-{row_qty}-{row_price}".strip()
+                except Exception:
+                    row_sig = ""
+                    
+                # Skip if already imported or matches an existing local trade signature
+                if ts_str in synced_set or (row_sig and row_sig in existing_local_sigs):
+                    if ts_str not in synced_set:
+                        synced_timestamps.append(ts_str)
+                        synced_set.add(ts_str)
                     continue
                     
                 try:
@@ -841,7 +877,8 @@ def sync_google_sheet():
                             "quantity": float(qty_val),
                             "priceUnit": float(price_val),
                             "why": local_trade.get("why", ""),
-                            "remark": local_trade.get("remark", "")
+                            "remark": local_trade.get("remark", ""),
+                            "timestamp": sig  # Pass the unique signature as timestamp so Google Sheets logs it
                         }
                     }
                     try:
@@ -879,7 +916,7 @@ def get_google_sheet_settings():
     return {
         "google_sheet_id": db_data.get("google_sheet_id", ""),
         "google_apps_script_url": db_data.get("google_apps_script_url", ""),
-        "synced_count": len(db_data.get("synced_google_form_timestamps", []))
+        "synced_count": len(db_data.get("trades", []))
     }
 
 @app.post("/api/google-sheet-settings")
@@ -935,9 +972,86 @@ def trigger_google_sheet_sync():
         "trades": db_data.get("trades", [])
     }
 
+def rewrite_excel_from_db(trades):
+    if not os.path.exists(EXCEL_PATH):
+        return
+    try:
+        import openpyxl
+        wb = openpyxl.load_workbook(EXCEL_PATH)
+        if 'Journal' not in wb.sheetnames:
+            return
+            
+        sheet = wb['Journal']
+        
+        # Clear existing data rows (keep header row 1)
+        if sheet.max_row > 1:
+            sheet.delete_rows(2, sheet.max_row)
+            
+        # Write trades one by one
+        for i, t in enumerate(trades):
+            row_num = i + 2
+            date_str = t.get("date", "")
+            try:
+                date_obj = datetime.datetime.strptime(date_str, "%Y-%m-%d") if date_str else datetime.datetime.now()
+            except Exception:
+                date_obj = datetime.datetime.now()
+                
+            qty = float(t.get("quantity", 0))
+            price = float(t.get("priceUnit", 0))
+            
+            sheet.cell(row=row_num, column=1, value=date_obj)
+            sheet.cell(row=row_num, column=2, value=t.get("assetName", ""))
+            sheet.cell(row=row_num, column=3, value=t.get("assetType", ""))
+            sheet.cell(row=row_num, column=4, value=t.get("currency", "THB"))
+            sheet.cell(row=row_num, column=5, value=t.get("action", "Buy"))
+            sheet.cell(row=row_num, column=6, value=qty)
+            sheet.cell(row=row_num, column=7, value=price)
+            
+            # Formulas
+            sheet.cell(row=row_num, column=8, value=f"=F{row_num}*G{row_num}")
+            sheet.cell(row=row_num, column=9, value=price) # default live price to cost
+            sheet.cell(row=row_num, column=10, value=f"=F{row_num}*I{row_num}")
+            sheet.cell(row=row_num, column=11, value=f'=IF(E{row_num}="Buy",(I{row_num}-G{row_num})*F{row_num},(G{row_num}-I{row_num})*F{row_num})')
+            sheet.cell(row=row_num, column=12, value=f"=IF(H{row_num}=0,0,K{row_num}/H{row_num})")
+            
+            sheet.cell(row=row_num, column=13, value=t.get("why", ""))
+            sheet.cell(row=row_num, column=14, value=t.get("remark", ""))
+            
+        wb.save(EXCEL_PATH)
+        print(f"[Cleanup] Re-wrote Excel sheet with {len(trades)} deduplicated trades.")
+    except Exception as ex:
+        print("Error rewriting Excel sheet:", ex)
+
+def deduplicate_local_db():
+    db_data = load_db()
+    trades = db_data.get("trades", [])
+    unique_trades = []
+    seen_sigs = set()
+    
+    for t in trades:
+        # Construct content signature
+        date_val = t.get("date", "")
+        asset_val = t.get("assetName", "")
+        action_val = t.get("action", "")
+        qty_val = t.get("quantity", 0)
+        price_val = t.get("priceUnit", 0)
+        sig = f"sig-{date_val}-{asset_val}-{action_val.capitalize()}-{float(qty_val)}-{float(price_val)}".strip()
+        
+        if sig not in seen_sigs:
+            seen_sigs.add(sig)
+            unique_trades.append(t)
+            
+    if len(unique_trades) < len(trades):
+        print(f"[Cleanup] Deduplicated trades in db.json: from {len(trades)} to {len(unique_trades)}")
+        db_data["trades"] = unique_trades
+        save_db(db_data)
+        rewrite_excel_from_db(unique_trades)
+
 @app.on_event("startup")
 def startup_event():
     print("[Startup] Checking for Google Sheet Mobile Sync configuration...")
+    # Deduplicate local database and Excel on startup to clean up duplicates
+    deduplicate_local_db()
     sync_google_sheet()
 
 

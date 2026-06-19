@@ -301,7 +301,8 @@ function addTrade(trade) {
   
   var dateVal = trade.date || Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd");
   
-  writeCell(["timestamp"], new Date());
+  var tsToWrite = trade.timestamp ? trade.timestamp : new Date();
+  writeCell(["timestamp"], tsToWrite);
   writeCell(["date"], new Date(dateVal));
   writeCell(["asset name", "asset_name", "asset"], trade.assetName);
   writeCell(["asset type", "asset_type", "type"], trade.assetType);
