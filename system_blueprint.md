@@ -360,3 +360,29 @@ function deleteTrade(tradeId) {
 
 **Commit:** `e75fa92` — `Fix: remove setup screen watermarks and enable cloud mode portfolio transfers/management`
 
+---
+
+### [2026-06-19] — Feature: Persistent Cloud Portfolio Configuration Stored on Google Sheets
+
+**Symptom / Request:**
+Storing custom portfolio mappings and custom portfolio lists client-side in browser `localStorage` can overload memory on mobile over time and fails to synchronize portfolio changes across multiple devices accessing the same journal.
+
+**Fixes Applied:**
+1. **Google Sheets Config Sheet:**
+   - Apps Script automatically creates and reads a secondary sheet tab named **`Portfolios`** with headers `Asset Name`, `Portfolio`, and `Portfolio Names`.
+   - Incoming requests (`addPortfolio`, `deletePortfolio`, `renamePortfolio`, `transferPosition`) write updates directly to this tab on Google Sheets.
+2. **Guaranteed CORS Read Integration (`frontend/src/App.jsx`):**
+   - The frontend's `fetchDirectFromGoogleSheet` function now queries the `Portfolios` sheet tab using a public CORS-safe CSV endpoint (`gviz/tq?sheet=Portfolios`).
+   - Mappings and portfolios list are loaded dynamically on page mount, allowing all client devices to stay synchronized.
+   - Values are cached in `localStorage` for fast offline loading and fallback.
+3. **Deployment Documentation Updated:**
+   - Updated **`github_sheets_serverless_deployment_guide.md`** with the new Apps Script code so the user can redeploy the script to script.google.com.
+
+**Files Changed:**
+- `frontend/src/App.jsx`
+- `github_sheets_serverless_deployment_guide.md`
+- `system_blueprint.md`
+
+**Commit:** `0720d43` — `Fix: save portfolio mappings and custom portfolios to google sheets Portfolios tab`
+
+
