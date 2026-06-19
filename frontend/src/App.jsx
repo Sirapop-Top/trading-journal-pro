@@ -256,6 +256,23 @@ function App() {
 
   const handleSaveGoogleSheetSettings = async () => {
     setIsSyncingSheet(true);
+    
+    // In Cloud Mode (GitHub Pages), save directly to browser localStorage and refresh trades list
+    if (isCloudMode) {
+      try {
+        localStorage.setItem('google_apps_script_url', googleAppsScriptUrl.trim());
+        localStorage.setItem('google_sheet_id', googleSheetId.trim());
+        message.success('Cloud sync settings saved to browser local storage!');
+        await fetchData(); // Fetch trades using the new Apps Script URL
+      } catch (err) {
+        console.error('Error saving local cloud settings:', err);
+        message.error('Failed to save cloud settings.');
+      } finally {
+        setIsSyncingSheet(false);
+      }
+      return;
+    }
+    
     try {
       const response = await axios.post(`${API_BASE}/api/google-sheet-settings`, {
         google_sheet_id: googleSheetId,
@@ -279,6 +296,19 @@ function App() {
 
   const handleSyncGoogleSheet = async () => {
     setIsSyncingSheet(true);
+    if (isCloudMode) {
+      try {
+        await fetchData();
+        message.success('Refreshed data from cloud Google Sheets!');
+      } catch (err) {
+        console.error('Error refreshing cloud data:', err);
+        message.error('Failed to refresh data.');
+      } finally {
+        setIsSyncingSheet(false);
+      }
+      return;
+    }
+    
     try {
       const response = await axios.post(`${API_BASE}/api/google-sheet-sync`);
       if (response.data.success) {
