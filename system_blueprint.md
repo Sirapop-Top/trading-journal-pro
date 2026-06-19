@@ -145,15 +145,78 @@ const getApiUrl = (endpoint) => {
 
 ---
 
-## 🔄 Sync Engine & CORS Fallback Architecture (Recent Updates)
+## 🔄 Sync Engine & CORS Fallback Architecture
 
 ### 1. Duplication Prevention (Local Backend)
-* **Signature-Based Deduplication**: When syncing local trades with Google Sheets, transactions are matched by signature (`Date|Asset|Action|Quantity|PriceUnit`). This prevents double logging if the user clicks sync multiple times.
+* **Signature-Based Deduplication**: When syncing local trades with Google Sheets, transactions are matched by a composite signature (`Date|Asset|Action|Quantity|PriceUnit`). This prevents double logging if the user clicks sync multiple times.
 * **Startup Deduplication Manager**: A startup handler (`deduplicate_local_db`) runs automatically on FastAPI launch, cleaning up duplicates in `db.json` and rewriting `Trading Journal.xlsx` cleanly.
 
-### 2. CORS & Tracking Blocker Resilience (Frontend)
-* **Direct Google Sheet CSV Fallback**: To bypass mobile CORS redirect strictness (common on Safari/Brave where redirects from `script.google.com` to `script.googleusercontent.com` are blocked), the frontend implements a dual-mode fetch:
-  1. Try fetching via Google Apps Script Web App (`doGet?action=getData`).
-  2. If blocked by the browser, fallback immediately to query the public Google Sheet directly as CSV using `https://docs.google.com/spreadsheets/d/{google_sheet_id}/gviz/tq?tqx=out:csv&sheet=Journal`.
-* **Client-Side CSV Parser**: An RFC 4180-compliant parser in the frontend splits cells, handles nested quotes and commas, maps column indexes, and rebuilds the `trades` array entirely client-side.
-* **Rates Fallback**: Replaces missing server rates by calling the free exchange-rate API `https://open.er-api.com/v6/latest/USD` (CORS-enabled).
+### 2. Cloud Mode Data Fetch Strategy (Frontend — `fetchData`)
+The frontend uses a **two-step read strategy** in Cloud Mode to guarantee data loads on all browsers including mobile Safari and Brave:
+
+| Step | Source | Purpose | CORS Safe? |
+|------|--------|---------|------------|
+| **Step 1 (Primary)** | `gviz/tq?tqx=out:csv` Google Sheet CSV | Load all trades & build portfolio | ✅ Always |
+| **Step 2 (Best-effort)** | Google Apps Script `?action=getData` | Fetch live Yahoo Finance prices & exchange rates | ⚠️ May fail on mobile |
+
+```
+fetchData() in Cloud Mode:
+  ├── fetchDirectFromGoogleSheet(sheetId)   ← ALWAYS runs first (guaranteed CORS)
+  │     └── gviz/tq CSV → parseCSV() → setTrades() → setPortfolios()
+  │     └── open.er-api.com → setLiveRates()          ← rates fallback
+  └── callGoogleAppsScript(?action=getData)  ← best-effort for live prices only
+        ├── success → setLivePrices(), setLiveRates() ← overrides CSV rates
+        └── failure → silent warn, WAC used as price fallback
+```
+
+* **Why CSV first?** The `gviz/tq` endpoint is served with `Access-Control-Allow-Origin: *` and never issues a cross-origin redirect. Apps Script redirects `script.google.com → script.googleusercontent.com`, which many mobile browsers block silently under strict tracking protection.
+* **Apps Script for writes only**: `addTrade` and `deleteTrade` still use `callGoogleAppsScript` via POST with `Content-Type: text/plain` (bypasses CORS preflight OPTIONS).
+* **Client-Side CSV Parser**: An RFC 4180-compliant parser (`parseCSV`) handles nested quotes, commas inside values, CRLF line endings, and maps columns by fuzzy keyword matching (e.g., `"price/unit"`, `"price_unit"`, `"price unit"` all resolve to `priceUnit`).
+* **Exchange Rate Fallback**: If Apps Script is blocked, `open.er-api.com/v6/latest/USD` (CORS-enabled, free tier) is called to retrieve `USD→THB` and `EUR→THB` rates.
+
+### 3. `getApiUrl` Resolver Logic
+```javascript
+const getApiUrl = (endpoint) => {
+  const useCloud = isCloudMode || !window.location.hostname;
+  if (useCloud) {
+    return { type: 'cloud', url: localStorage.getItem('google_apps_script_url') || '' };
+    // Always returns 'cloud' on GitHub Pages — even if Apps Script URL not set yet,
+    // because the CSV read path only needs the Sheet ID, not the script URL.
+  }
+  return { type: 'local', url: `${API_BASE}${endpoint}` };
+};
+```
+
+### 4. Onboarding Guard Logic
+The initial setup screen (`AlphaTrader Cloud`) is shown only when **both** the Google Sheet ID **and** the Apps Script URL are absent from `localStorage`. If the Sheet ID alone is present (saved from a prior session), the main app mounts and loads trades immediately via the CSV path without waiting for the Apps Script URL.
+
+```javascript
+// App.jsx — early return condition
+if (isCloudMode && !googleSheetId && !googleAppsScriptUrl) {
+  return <OnboardingScreen />;   // Shows only on brand-new fresh browser
+}
+```
+
+---
+
+## 🐛 Bug Fix Log
+
+### [2026-06-19] — Fix: Zero Balance on Mobile / GitHub Pages
+
+**Symptom:** Opening `https://sirapop-top.github.io/trading-journal-pro/` on mobile showed zero balance and no trades, while `http://localhost:5173/` on PC showed all 10 transactions correctly.
+
+**Root Causes Identified:**
+
+1. **`getApiUrl` returned `type: 'local'` if Apps Script URL was missing** — Even in Cloud Mode on GitHub Pages, if `localStorage` had no script URL, `getApiUrl` fell through to `type: 'local'`, causing `axios.get('')` against a non-existent local server → empty trades → zero balance.
+
+2. **Apps Script CORS redirect silently blocked on mobile** — `fetch(scriptUrl, { redirect: 'follow' })` follows the `script.google.com → script.googleusercontent.com` redirect, but mobile Safari/Brave block this cross-origin redirect under tracking protection, returning an opaque/failed response before the catch block even runs.
+
+3. **Onboarding guard too strict** — `if (isCloudMode && !googleAppsScriptUrl)` blocked the entire app even if only the Apps Script URL was missing. A user with just the Sheet ID stored could not load any data.
+
+**Fix Applied (`frontend/src/App.jsx`):**
+- `getApiUrl`: Changed to always return `type: 'cloud'` when `isCloudMode` is true, regardless of whether the Apps Script URL is set.
+- `fetchData` (Cloud Mode): Restructured to use **CSV as the mandatory primary source** for all trade data. Apps Script is only called afterwards in a non-blocking best-effort block to retrieve live prices.
+- Onboarding guard: Changed from `!googleAppsScriptUrl` to `!googleSheetId && !googleAppsScriptUrl` so the app loads when at least the Sheet ID is present.
+
+**Commit:** `ed4a569` — `Fix zero balance bug: use CORS-safe CSV as primary data source in cloud mode`
+
