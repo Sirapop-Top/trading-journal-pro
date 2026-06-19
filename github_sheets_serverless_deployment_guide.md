@@ -111,6 +111,18 @@ function doPost(e) {
   } else if (action === "deleteTrade") {
     return ContentService.createTextOutput(JSON.stringify(deleteTrade(contents.tradeId)))
       .setMimeType(ContentService.MimeType.JSON);
+  } else if (action === "addPortfolio") {
+    return ContentService.createTextOutput(JSON.stringify(addPortfolio(contents.name)))
+      .setMimeType(ContentService.MimeType.JSON);
+  } else if (action === "deletePortfolio") {
+    return ContentService.createTextOutput(JSON.stringify(deletePortfolio(contents.portfolioName)))
+      .setMimeType(ContentService.MimeType.JSON);
+  } else if (action === "renamePortfolio") {
+    return ContentService.createTextOutput(JSON.stringify(renamePortfolio(contents.oldName, contents.newName)))
+      .setMimeType(ContentService.MimeType.JSON);
+  } else if (action === "transferPosition") {
+    return ContentService.createTextOutput(JSON.stringify(transferPosition(contents.assetName, contents.targetPortfolio)))
+      .setMimeType(ContentService.MimeType.JSON);
   }
   
   // Fallback for legacy direct form uploads
@@ -391,5 +403,137 @@ function deleteTrade(tradeId) {
   }
   
   return { success: false, error: "Row index out of range: " + rowIdx + " (lastRow=" + lastRow + ")" };
+}
+
+// Helper to get or create the Portfolios config sheet
+function getOrCreatePortfoliosSheet() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("Portfolios");
+  if (!sheet) {
+    sheet = ss.insertSheet("Portfolios");
+    // Write headers
+    sheet.getRange(1, 1, 1, 3).setValues([["Asset Name", "Portfolio", "Portfolio Names"]]);
+    // Initialize default portfolios in column C
+    sheet.getRange(2, 3, 3, 1).setValues([["Main Trading"], ["BTC Stock"], ["Crypto"]]);
+  }
+  return sheet;
+}
+
+// Create a new portfolio custom name
+function addPortfolio(name) {
+  var sheet = getOrCreatePortfoliosSheet();
+  var lastRow = sheet.getLastRow();
+  var values = sheet.getRange(1, 3, lastRow, 1).getValues();
+  
+  // Check if it already exists
+  for (var i = 1; i < values.length; i++) {
+    if (values[i][0].toString().trim().toLowerCase() === name.toLowerCase()) {
+      return { success: true, message: "Portfolio already exists" };
+    }
+  }
+  
+  // Find first empty cell in Column C or append
+  var targetRow = 2;
+  for (var i = 1; i < values.length; i++) {
+    if (values[i][0] === "") {
+      targetRow = i + 1;
+      break;
+    }
+    if (i === values.length - 1) {
+      targetRow = lastRow + 1;
+    }
+  }
+  if (lastRow === 1) targetRow = 2;
+  
+  sheet.getRange(targetRow, 3).setValue(name);
+  return { success: true };
+}
+
+// Delete portfolio and all its asset mappings
+function deletePortfolio(portfolioName) {
+  var sheet = getOrCreatePortfoliosSheet();
+  var lastRow = sheet.getLastRow();
+  
+  // 1. Remove from portfolio names list (column C)
+  var nameValues = sheet.getRange(1, 3, lastRow, 1).getValues();
+  for (var i = 1; i < nameValues.length; i++) {
+    if (nameValues[i][0].toString().trim().toLowerCase() === portfolioName.toLowerCase()) {
+      sheet.getRange(i + 1, 3).setValue(""); // clear the value
+    }
+  }
+  
+  // 2. Remove mappings for assets assigned to this portfolio (columns A-B)
+  var mappingValues = sheet.getRange(1, 1, lastRow, 2).getValues();
+  // Delete rows from bottom up to avoid shifting index problems
+  for (var j = lastRow; j >= 2; j--) {
+    var mappedPort = mappingValues[j-1][1].toString().trim();
+    if (mappedPort.toLowerCase() === portfolioName.toLowerCase()) {
+      sheet.getRange(j, 1, 1, 2).clearContent();
+    }
+  }
+  
+  return { success: true };
+}
+
+// Rename a custom portfolio name and update all associated asset mappings
+function renamePortfolio(oldName, newName) {
+  var sheet = getOrCreatePortfoliosSheet();
+  var lastRow = sheet.getLastRow();
+  
+  // 1. Update in portfolio names list (column C)
+  var nameValues = sheet.getRange(1, 3, lastRow, 1).getValues();
+  for (var i = 1; i < nameValues.length; i++) {
+    if (nameValues[i][0].toString().trim().toLowerCase() === oldName.toLowerCase()) {
+      sheet.getRange(i + 1, 3).setValue(newName);
+    }
+  }
+  
+  // 2. Update mappings (columns A-B)
+  var mappingValues = sheet.getRange(1, 1, lastRow, 2).getValues();
+  for (var j = 2; j <= lastRow; j++) {
+    var mappedPort = mappingValues[j-1][1].toString().trim();
+    if (mappedPort.toLowerCase() === oldName.toLowerCase()) {
+      sheet.getRange(j, 2).setValue(newName);
+    }
+  }
+  
+  return { success: true };
+}
+
+// Map asset to portfolio and ensure portfolio name is defined
+function transferPosition(assetName, targetPortfolio) {
+  var sheet = getOrCreatePortfoliosSheet();
+  var lastRow = sheet.getLastRow();
+  
+  var mappingValues = sheet.getRange(1, 1, lastRow, 2).getValues();
+  var found = false;
+  
+  // Look for existing asset mapping
+  for (var i = 1; i < mappingValues.length; i++) {
+    if (mappingValues[i][0].toString().trim().toUpperCase() === assetName.toUpperCase()) {
+      sheet.getRange(i + 1, 2).setValue(targetPortfolio);
+      found = true;
+      break;
+    }
+  }
+  
+  // If not found, find an empty row in Columns A-B, or append
+  if (!found) {
+    var targetRow = lastRow + 1;
+    for (var i = 1; i < mappingValues.length; i++) {
+      if (mappingValues[i][0] === "" && mappingValues[i][1] === "") {
+        targetRow = i + 1;
+        break;
+      }
+    }
+    if (lastRow === 1) targetRow = 2;
+    sheet.getRange(targetRow, 1).setValue(assetName.toUpperCase());
+    sheet.getRange(targetRow, 2).setValue(targetPortfolio);
+  }
+  
+  // Also ensure target portfolio name is in Column C
+  addPortfolio(targetPortfolio);
+  
+  return { success: true };
 }
 ```

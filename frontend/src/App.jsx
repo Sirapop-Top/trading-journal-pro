@@ -274,15 +274,66 @@ function App() {
     const remarkIdx = findColIdx(["remark", "note"]);
     
     const loadedTrades = [];
-    const loadedPortfolios = new Set(["Main Trading", "BTC Stock", "Crypto"]);
+    const loadedPortfolios = new Set();
     
-    // Load custom empty portfolios from localStorage in Cloud Mode
+    // Fetch Portfolios config sheet if it exists
+    let customMappings = {};
+    let customPortfoliosList = ["Main Trading", "BTC Stock", "Crypto"];
     try {
-      const customPortfolios = JSON.parse(localStorage.getItem('alphatrader_custom_portfolios') || '[]');
-      customPortfolios.forEach(p => loadedPortfolios.add(p));
-    } catch (e) {
-      console.error("Error loading custom portfolios:", e);
+      const portCsvUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&sheet=Portfolios`;
+      const portRes = await fetch(portCsvUrl);
+      if (portRes.ok) {
+        const portCsvText = await portRes.text();
+        const portRows = parseCSV(portCsvText);
+        if (portRows.length > 1) {
+          const pHeaders = portRows[0].map(h => h.toString().toLowerCase().trim());
+          const assetCol = pHeaders.indexOf("asset name");
+          const portCol = pHeaders.indexOf("portfolio");
+          const namesCol = pHeaders.indexOf("portfolio names");
+          
+          const tempPortfolios = new Set();
+          
+          for (let k = 1; k < portRows.length; k++) {
+            const pRow = portRows[k];
+            // Read mapping
+            if (assetCol !== -1 && portCol !== -1 && pRow[assetCol] && pRow[portCol]) {
+              const assetName = pRow[assetCol].toString().trim().toUpperCase();
+              const portName = pRow[portCol].toString().trim();
+              if (assetName && portName) {
+                customMappings[assetName] = portName;
+              }
+            }
+            // Read custom portfolio name
+            if (namesCol !== -1 && pRow[namesCol]) {
+              const pName = pRow[namesCol].toString().trim();
+              if (pName) {
+                tempPortfolios.add(pName);
+              }
+            }
+          }
+          
+          if (tempPortfolios.size > 0) {
+            customPortfoliosList = Array.from(tempPortfolios);
+          }
+          
+          // Cache to localStorage for fast offline access
+          localStorage.setItem('alphatrader_portfolio_mappings', JSON.stringify(customMappings));
+          localStorage.setItem('alphatrader_custom_portfolios', JSON.stringify(customPortfoliosList));
+        }
+      } else {
+        // Portfolios sheet tab doesn't exist yet, try to load from localStorage cache
+        customMappings = JSON.parse(localStorage.getItem('alphatrader_portfolio_mappings') || '{}');
+        customPortfoliosList = JSON.parse(localStorage.getItem('alphatrader_custom_portfolios') || '["Main Trading", "BTC Stock", "Crypto"]');
+      }
+    } catch (err) {
+      console.warn("Could not load Portfolios config sheet from cloud, loading cached from localStorage:", err);
+      try {
+        customMappings = JSON.parse(localStorage.getItem('alphatrader_portfolio_mappings') || '{}');
+        customPortfoliosList = JSON.parse(localStorage.getItem('alphatrader_custom_portfolios') || '["Main Trading", "BTC Stock", "Crypto"]');
+      } catch (e) {}
     }
+
+    customPortfoliosList.forEach(p => loadedPortfolios.add(p));
     
     for (let i = 1; i < rows.length; i++) {
       const row = rows[i];
@@ -306,14 +357,9 @@ function App() {
         portfolio = "BTC Stock";
       }
       
-      // Apply custom overrides from localStorage in Cloud Mode
-      try {
-        const customMappings = JSON.parse(localStorage.getItem('alphatrader_portfolio_mappings') || '{}');
-        if (customMappings[assetName]) {
-          portfolio = customMappings[assetName];
-        }
-      } catch (e) {
-        console.error("Error loading portfolio mapping for asset:", e);
+      // Apply custom overrides
+      if (customMappings[assetName]) {
+        portfolio = customMappings[assetName];
       }
       
       const qty = quantityIdx !== -1 ? parseFloat(row[quantityIdx]) : 0;
@@ -973,6 +1019,15 @@ function App() {
           const customMappings = JSON.parse(localStorage.getItem('alphatrader_portfolio_mappings') || '{}');
           customMappings[newTrade.assetName] = newTrade.portfolio;
           localStorage.setItem('alphatrader_portfolio_mappings', JSON.stringify(customMappings));
+
+          // Also sync mapping via Apps Script transferPosition action in background to keep sheet updated
+          if (api.url) {
+            callGoogleAppsScript(api.url, {
+              action: "transferPosition",
+              assetName: newTrade.assetName,
+              targetPortfolio: newTrade.portfolio
+            }).catch(e => console.error("Error background syncing mapping:", e));
+          }
         } catch (e) {
           console.error("Error saving portfolio mapping:", e);
         }
@@ -1040,6 +1095,19 @@ function App() {
           }
           return prev;
         });
+
+        // Sync with Google Sheet Apps Script in the background
+        if (api.url) {
+          try {
+            await callGoogleAppsScript(api.url, {
+              action: "addPortfolio",
+              name: name
+            });
+          } catch (cloudErr) {
+            console.error("Error syncing addPortfolio to cloud:", cloudErr);
+          }
+        }
+
         message.success(`Portfolio "${name}" created.`);
         setIsPortfolioModalOpen(false);
         portfolioForm.resetFields();
@@ -1091,6 +1159,19 @@ function App() {
         if (activePortfolio === portfolioName) {
           setActivePortfolio('All Portfolios');
         }
+
+        // Sync with Google Sheet Apps Script in the background
+        if (api.url) {
+          try {
+            await callGoogleAppsScript(api.url, {
+              action: "deletePortfolio",
+              portfolioName: portfolioName
+            });
+          } catch (cloudErr) {
+            console.error("Error syncing deletePortfolio to cloud:", cloudErr);
+          }
+        }
+
         message.success(`Portfolio "${portfolioName}" deleted.`);
         await fetchData();
       } else {
@@ -1144,6 +1225,19 @@ function App() {
           setActivePortfolio(newName);
         }
 
+        // Sync with Google Sheet Apps Script in the background
+        if (api.url) {
+          try {
+            await callGoogleAppsScript(api.url, {
+              action: "renamePortfolio",
+              oldName: oldName,
+              newName: newName
+            });
+          } catch (cloudErr) {
+            console.error("Error syncing renamePortfolio to cloud:", cloudErr);
+          }
+        }
+
         message.success(`Portfolio renamed successfully to "${newName}".`);
         setIsRenameModalOpen(false);
         renameForm.resetFields();
@@ -1179,6 +1273,19 @@ function App() {
         const customMappings = JSON.parse(localStorage.getItem('alphatrader_portfolio_mappings') || '{}');
         customMappings[transferTargetAsset] = targetPortfolio;
         localStorage.setItem('alphatrader_portfolio_mappings', JSON.stringify(customMappings));
+
+        // Sync with Google Sheet Apps Script in the background
+        if (api.url) {
+          try {
+            await callGoogleAppsScript(api.url, {
+              action: "transferPosition",
+              assetName: transferTargetAsset,
+              targetPortfolio: targetPortfolio
+            });
+          } catch (cloudErr) {
+            console.error("Error syncing transferPosition to cloud:", cloudErr);
+          }
+        }
 
         message.success(`Successfully transferred ${transferTargetAsset} position to '${targetPortfolio}'.`);
         setIsTransferModalOpen(false);
