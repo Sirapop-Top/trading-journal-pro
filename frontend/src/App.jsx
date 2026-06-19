@@ -190,6 +190,9 @@ function App() {
   const [googleSheetSyncCount, setGoogleSheetSyncCount] = useState(0);
   const [googleAppsScriptUrl, setGoogleAppsScriptUrl] = useState(() => localStorage.getItem('google_apps_script_url') || '');
   const [cloudConnectionError, setCloudConnectionError] = useState(null);
+  // isConnected is derived from localStorage — NOT from typing state.
+  // This prevents the onboarding guard from exiting while the user is still typing.
+  const [isConnected, setIsConnected] = useState(() => !!localStorage.getItem('google_sheet_id'));
 
   
   // Modals & Forms
@@ -1464,11 +1467,11 @@ function App() {
     }
   ];
 
-  // If we are in cloud mode and the Google Apps Script URL has not been configured in this browser yet,
-  // show the initial onboarding/setup screen to link the Google Sheet.
-  // Show onboarding only if BOTH Sheet ID and Apps Script URL are missing
-  // (Sheet ID alone is enough to read trades via the CSV fallback)
-  if (isCloudMode && !googleSheetId && !googleAppsScriptUrl) {
+  // Guard: show onboarding only when NOT yet connected (localStorage has no Sheet ID).
+  // IMPORTANT: check localStorage via isConnected state — NOT the React typing states
+  // (googleSheetId/googleAppsScriptUrl change on every keystroke and would cause
+  // premature exit from the onboarding screen before the user clicks Connect).
+  if (isCloudMode && !isConnected) {
     return (
       <ConfigProvider
         theme={{
@@ -1500,17 +1503,17 @@ function App() {
             <Space direction="vertical" size="middle" style={{ width: '100%' }}>
               <div style={{ background: '#0b0e17', border: '1px solid #1f293d', padding: '16px', borderRadius: '8px' }}>
                 <strong style={{ color: '#ffffff', display: 'block', marginBottom: '8px', fontSize: '14px' }}>
-                  1. Paste Google Sheet ID (Read Access):
+                  1. Paste Google Sheet ID: <span style={{ color: '#f43f5e' }}>*</span>
                 </strong>
                 <Input 
                   placeholder="e.g. 1kUYZcvNnbw-ihbPFkr4xbGHW3597UKC-n9B1jnS2djs"
                   value={googleSheetId}
                   onChange={(e) => setGoogleSheetId(e.target.value)}
-                  style={{ width: '100%', borderRadius: '4px', marginBottom: '12px' }}
+                  style={{ width: '100%', borderRadius: '4px', marginBottom: '16px' }}
                 />
 
-                <strong style={{ color: '#ffffff', display: 'block', marginBottom: '8px', fontSize: '14px' }}>
-                  2. Paste Google Apps Script Web App URL (Write Access):
+                <strong style={{ color: '#ffffff', display: 'block', marginBottom: '4px', fontSize: '14px' }}>
+                  2. Paste Apps Script URL: <span style={{ color: 'var(--text-secondary)', fontWeight: 400, fontSize: '12px' }}>(optional — needed for writing trades from mobile)</span>
                 </strong>
                 <Input.Password
                   placeholder="https://script.google.com/macros/s/.../exec"
@@ -1530,14 +1533,19 @@ function App() {
                     message.error('Please enter your Google Sheet ID.');
                     return;
                   }
-                  if (!googleAppsScriptUrl.trim().startsWith('https://script.google.com')) {
-                    message.error('Invalid Apps Script URL. Please copy the URL from your deployment.');
+                  const scriptUrl = googleAppsScriptUrl.trim();
+                  if (scriptUrl && !scriptUrl.startsWith('https://script.google.com')) {
+                    message.error('Invalid Apps Script URL format.');
                     return;
                   }
-                  localStorage.setItem('google_apps_script_url', googleAppsScriptUrl.trim());
+                  // Save to localStorage FIRST — isConnected reads from localStorage
                   localStorage.setItem('google_sheet_id', googleSheetId.trim());
-                  message.success('Successfully connected to your journal!');
-                  fetchData(); // Trigger load
+                  if (scriptUrl) {
+                    localStorage.setItem('google_apps_script_url', scriptUrl);
+                  }
+                  // setIsConnected triggers re-render into main app (safe — not a typing state)
+                  setIsConnected(true);
+                  message.success('Connected! Loading your journal...');
                 }}
               >
                 Connect Journal
@@ -1549,7 +1557,7 @@ function App() {
                 message={<span style={{ fontWeight: 'bold' }}>First Time Setup?</span>}
                 description={
                   <span style={{ fontSize: '12px' }}>
-                    Follow the <strong>github_sheets_serverless_deployment_guide.md</strong> inside your project root to deploy your script and get your Web App URL.
+                    Only the <strong>Google Sheet ID</strong> is required to view your trades. The Apps Script URL is needed to <em>add or delete</em> trades from mobile.
                   </span>
                 }
               />
