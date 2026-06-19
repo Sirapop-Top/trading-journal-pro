@@ -1,0 +1,32 @@
+# Private Database and Excel logs (CRITICAL: Do not upload to GitHub!)
+db.json
+Trading Journal.xlsx
+*.xlsx
+.tmp.drivedownload/
+.tmp.driveupload/
+
+# Frontend dependencies and builds
+frontend/node_modules/
+frontend/dist/
+frontend/.env*
+frontend/.env.local
+frontend/.env.development.local
+frontend/.env.test.local
+frontend/.env.production.local
+
+# Python environment and cache files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+pip-log.txt
+pip-delete-this-directory.txt
+.env
+.venv
+pip-wheel-metadata/
+.mypy_cache/
+.pytest_cache/
