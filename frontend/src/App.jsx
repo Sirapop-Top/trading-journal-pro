@@ -53,6 +53,31 @@ const getApiUrl = (endpoint) => {
   return { type: 'local', url: `${API_BASE}${endpoint}` };
 };
 
+// Helper to communicate with Google Apps Script without triggering CORS preflight (OPTIONS) requests
+const callGoogleAppsScript = async (url, payload = null) => {
+  if (payload) {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'text/plain;charset=utf-8'
+      },
+      body: JSON.stringify(payload)
+    });
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    return await response.json();
+  } else {
+    const response = await fetch(url, {
+      method: 'GET'
+    });
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    return await response.json();
+  }
+};
+
 // Asset type categories for mapping and styling
 const ASSET_TYPE_COLORS = {
   'Thai Stock': '#00f2fe',
@@ -168,13 +193,13 @@ function App() {
     try {
       const api = getApiUrl('/api/data');
       if (api.type === 'cloud') {
-        const response = await axios.get(`${api.url}?action=getData`);
-        setTrades(response.data.trades);
-        setPortfolios(response.data.portfolios);
-        setLivePrices(response.data.livePrices || {});
-        setLiveRates(response.data.liveRates || { THB: 1.0, USD: 32.69, EUR: 38.04 });
-        if (response.data.syncTime) {
-          setSyncTime(dayjs(response.data.syncTime).format('YYYY-MM-DD HH:mm:ss'));
+        const data = await callGoogleAppsScript(`${api.url}?action=getData`);
+        setTrades(data.trades);
+        setPortfolios(data.portfolios);
+        setLivePrices(data.livePrices || {});
+        setLiveRates(data.liveRates || { THB: 1.0, USD: 32.69, EUR: 38.04 });
+        if (data.syncTime) {
+          setSyncTime(dayjs(data.syncTime).format('YYYY-MM-DD HH:mm:ss'));
         }
       } else {
         const response = await axios.get(api.url);
@@ -200,11 +225,11 @@ function App() {
     try {
       const api = getApiUrl('/api/sync');
       if (api.type === 'cloud') {
-        const response = await axios.get(`${api.url}?action=getData`);
-        setLivePrices(response.data.livePrices || {});
-        setLiveRates(response.data.liveRates || { THB: 1.0, USD: 32.69, EUR: 38.04 });
-        if (response.data.syncTime) {
-          setSyncTime(dayjs(response.data.syncTime).format('YYYY-MM-DD HH:mm:ss'));
+        const data = await callGoogleAppsScript(`${api.url}?action=getData`);
+        setLivePrices(data.livePrices || {});
+        setLiveRates(data.liveRates || { THB: 1.0, USD: 32.69, EUR: 38.04 });
+        if (data.syncTime) {
+          setSyncTime(dayjs(data.syncTime).format('YYYY-MM-DD HH:mm:ss'));
         }
         if (!silent) {
           message.success('Live market prices synced from Yahoo Finance.');
@@ -747,7 +772,7 @@ function App() {
           action: 'addTrade',
           trade: newTrade
         };
-        await axios.post(api.url, payload);
+        await callGoogleAppsScript(api.url, payload);
         message.success(`Trade for ${newTrade.assetName} logged successfully to Google Sheets.`);
         setIsTradeModalOpen(false);
         tradeForm.resetFields();
@@ -781,7 +806,7 @@ function App() {
           action: 'deleteTrade',
           tradeId: tradeId
         };
-        await axios.post(api.url, payload);
+        await callGoogleAppsScript(api.url, payload);
         setTrades(prev => prev.filter(t => t.id !== tradeId));
         message.success('Trade deleted from logs.');
       } else {
