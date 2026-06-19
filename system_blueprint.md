@@ -142,3 +142,18 @@ const getApiUrl = (endpoint) => {
 1. **Keep Private Data Offline:** The root `.gitignore` excludes `db.json`, `Trading Journal.xlsx`, and `*.xlsx` files. The repository on GitHub only contains the execution logic, rendering it safe even if pushed to public repositories.
 2. **Secure App Settings:** The Cloud URL parameters (Google Apps Script endpoint) are stored inside the browser's `LocalStorage` on the client side. No config files or secrets are compiled inside the build artifacts.
 3. **Google Sheets Security:** Link sheets as "Anyone with link can view" (Read-only) to let the app retrieve historical prices, while write operations are channeled through the Apps Script Web App `doPost` handler.
+
+---
+
+## 🔄 Sync Engine & CORS Fallback Architecture (Recent Updates)
+
+### 1. Duplication Prevention (Local Backend)
+* **Signature-Based Deduplication**: When syncing local trades with Google Sheets, transactions are matched by signature (`Date|Asset|Action|Quantity|PriceUnit`). This prevents double logging if the user clicks sync multiple times.
+* **Startup Deduplication Manager**: A startup handler (`deduplicate_local_db`) runs automatically on FastAPI launch, cleaning up duplicates in `db.json` and rewriting `Trading Journal.xlsx` cleanly.
+
+### 2. CORS & Tracking Blocker Resilience (Frontend)
+* **Direct Google Sheet CSV Fallback**: To bypass mobile CORS redirect strictness (common on Safari/Brave where redirects from `script.google.com` to `script.googleusercontent.com` are blocked), the frontend implements a dual-mode fetch:
+  1. Try fetching via Google Apps Script Web App (`doGet?action=getData`).
+  2. If blocked by the browser, fallback immediately to query the public Google Sheet directly as CSV using `https://docs.google.com/spreadsheets/d/{google_sheet_id}/gviz/tq?tqx=out:csv&sheet=Journal`.
+* **Client-Side CSV Parser**: An RFC 4180-compliant parser in the frontend splits cells, handles nested quotes and commas, maps column indexes, and rebuilds the `trades` array entirely client-side.
+* **Rates Fallback**: Replaces missing server rates by calling the free exchange-rate API `https://open.er-api.com/v6/latest/USD` (CORS-enabled).
