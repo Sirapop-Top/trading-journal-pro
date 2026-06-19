@@ -192,9 +192,15 @@ The initial setup screen (`AlphaTrader Cloud`) is shown only when **both** the G
 
 ```javascript
 // App.jsx — early return condition
-if (isCloudMode && !googleSheetId && !googleAppsScriptUrl) {
-  return <OnboardingScreen />;   // Shows only on brand-new fresh browser
+// isConnected is initialised ONCE from localStorage — stable, not affected by typing
+const [isConnected, setIsConnected] = useState(() => !!localStorage.getItem('google_sheet_id'));
+
+// Guard uses isConnected, not the live React typing states
+if (isCloudMode && !isConnected) {
+  return <OnboardingScreen />;
 }
+// On Connect click: save to localStorage first, then call setIsConnected(true)
+// The state change triggers re-render into the main app; useEffect auto-calls fetchData()
 ```
 
 ---
@@ -220,3 +226,47 @@ if (isCloudMode && !googleSheetId && !googleAppsScriptUrl) {
 
 **Commit:** `ed4a569` — `Fix zero balance bug: use CORS-safe CSV as primary data source in cloud mode`
 
+---
+
+### [2026-06-19] — Fix: Typing in Setup Screen Causes Premature Redirect to Dashboard
+
+**Symptom:** On the AlphaTrader Cloud setup screen, as soon as the user started typing the Google Sheet ID, the app immediately jumped to the dashboard and displayed a **"Cloud Sync Connection Blocked"** error popup, even before clicking the Connect button.
+
+**Root Cause:**
+
+The onboarding guard condition used React **typing state** (`googleSheetId`) instead of a stable **localStorage-backed flag**:
+
+```javascript
+// BROKEN — googleSheetId is a live React state that changes on every keystroke
+if (isCloudMode && !googleSheetId && !googleAppsScriptUrl) {
+  return <OnboardingScreen />;
+}
+// User types one character → !googleSheetId becomes false
+// → guard exits → main app mounts → useEffect fires fetchData()
+// → localStorage still empty → "Cloud Sync Connection Blocked" error
+```
+
+**Fix Applied (`frontend/src/App.jsx`):**
+
+Introduced a dedicated `isConnected` state that is initialised **once** from `localStorage` and only changes when the user explicitly clicks **"Connect Journal"**. Typing never affects it.
+
+```javascript
+// FIXED — isConnected only changes when user clicks Connect, not while typing
+const [isConnected, setIsConnected] = useState(
+  () => !!localStorage.getItem('google_sheet_id')  // reads localStorage once on mount
+);
+
+if (isCloudMode && !isConnected) {
+  return <OnboardingScreen />;
+}
+
+// On Connect click:
+localStorage.setItem('google_sheet_id', googleSheetId.trim());  // save first
+setIsConnected(true);   // triggers re-render into main app; useEffect auto-calls fetchData()
+```
+
+Additional improvements in the same fix:
+- **Apps Script URL made optional** on the setup screen — only the Sheet ID is required to read trades. The Script URL is only needed to write new trades from mobile.
+- **Info text updated** to clearly explain: Sheet ID = read access, Apps Script URL = write access.
+
+**Commit:** `52dc942` — `Fix onboarding guard: use isConnected state (localStorage) not typing state to prevent premature dashboard redirect`
