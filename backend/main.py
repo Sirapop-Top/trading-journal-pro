@@ -108,6 +108,15 @@ def load_from_excel_and_save():
         save_db(default_data)
         return default_data
 
+    # Load existing settings to avoid overwriting them
+    old_data = {}
+    if os.path.exists(DB_PATH):
+        try:
+            with open(DB_PATH, "r", encoding="utf-8") as f:
+                old_data = json.load(f)
+        except Exception:
+            pass
+
     try:
         print("Parsing Trading Journal.xlsx...")
         df = pd.read_excel(EXCEL_PATH, sheet_name="Journal")
@@ -156,17 +165,23 @@ def load_from_excel_and_save():
         
         data = {
             "trades": trades,
-            "portfolios": portfolios
+            "portfolios": portfolios,
+            "google_sheet_id": old_data.get("google_sheet_id", ""),
+            "google_apps_script_url": old_data.get("google_apps_script_url", ""),
+            "synced_google_form_timestamps": old_data.get("synced_google_form_timestamps", [])
         }
         save_db(data)
         print(f"Successfully loaded {len(trades)} trades from Excel sheet.")
         return data
     except Exception as e:
         print("Error parsing Excel:", e)
-        # Fallback default
+        # Fallback default keeping old settings if possible
         default_data = {
             "trades": [],
-            "portfolios": ["Main Investment", "Short-Term Trading", "Crypto"]
+            "portfolios": ["Main Investment", "Short-Term Trading", "Crypto"],
+            "google_sheet_id": old_data.get("google_sheet_id", ""),
+            "google_apps_script_url": old_data.get("google_apps_script_url", ""),
+            "synced_google_form_timestamps": old_data.get("synced_google_form_timestamps", [])
         }
         save_db(default_data)
         return default_data
@@ -652,6 +667,15 @@ def sync_google_sheet():
         print("[Google Sheet Sync] No google_sheet_id configured in db.json.")
         return False
         
+    # Auto-extract Google Sheet ID if the user pasted the entire URL
+    sheet_id = sheet_id.strip()
+    if "docs.google.com/spreadsheets" in sheet_id:
+        try:
+            sheet_id = sheet_id.split("/d/")[1].split("/")[0]
+            print(f"[Google Sheet Sync] Extracted clean Sheet ID: {sheet_id}")
+        except Exception as parse_err:
+            print(f"[Google Sheet Sync] Warning: Could not parse Sheet ID from URL: {parse_err}")
+        
     try:
         import requests
         import io
@@ -665,28 +689,6 @@ def sync_google_sheet():
             return False
             
         df = pd.read_excel(io.BytesIO(response.content))
-        if df.empty:
-            print("[Google Sheet Sync] Downloaded spreadsheet is empty.")
-            return True
-            
-        cols = [str(c).strip().lower() for c in df.columns]
-        
-        def find_col_idx(keywords):
-            for i, c in enumerate(cols):
-                if any(kw in c for kw in keywords):
-                    return i
-            return None
-            
-        timestamp_idx = find_col_idx(["timestamp"])
-        date_idx = find_col_idx(["date"])
-        asset_name_idx = find_col_idx(["asset name", "asset_name", "asset"])
-        asset_type_idx = find_col_idx(["asset type", "asset_type", "type"])
-        currency_idx = find_col_idx(["currency"])
-        action_idx = find_col_idx(["action"])
-        quantity_idx = find_col_idx(["quantity", "qty"])
-        price_unit_idx = find_col_idx(["price/unit", "price_unit", "price unit", "price"])
-        why_idx = find_col_idx(["why", "decision", "reason"])
-        remark_idx = find_col_idx(["remark", "note"])
         
         synced_timestamps = db_data.get("synced_google_form_timestamps", [])
         synced_set = set(synced_timestamps)
@@ -694,105 +696,177 @@ def sync_google_sheet():
         new_trades_count = 0
         trades_list = db_data.get("trades", [])
         
-        for idx_row, row in df.iterrows():
-            ts_val = row.iloc[timestamp_idx] if timestamp_idx is not None else None
+        if df.empty:
+            print("[Google Sheet Sync] Downloaded spreadsheet is empty. Ready for local-to-cloud initial sync.")
+        else:
+            cols = [str(c).strip().lower() for c in df.columns]
             
-            # If no timestamp column exists, construct a unique row signature to prevent duplicates
-            if pd.isna(ts_val) or ts_val is None:
-                date_raw = row.iloc[date_idx] if date_idx is not None else ""
-                asset_raw = row.iloc[asset_name_idx] if asset_name_idx is not None else ""
-                action_raw = row.iloc[action_idx] if action_idx is not None else ""
-                qty_raw = row.iloc[quantity_idx] if quantity_idx is not None else 0
-                price_raw = row.iloc[price_unit_idx] if price_unit_idx is not None else 0
-                ts_str = f"sig-{date_raw}-{asset_raw}-{action_raw}-{qty_raw}-{price_raw}".strip()
-            else:
-                ts_str = str(ts_val).strip()
+            def find_col_idx(keywords):
+                for i, c in enumerate(cols):
+                    if any(kw in c for kw in keywords):
+                        return i
+                return None
                 
-            if ts_str in synced_set:
-                continue
+            timestamp_idx = find_col_idx(["timestamp"])
+            date_idx = find_col_idx(["date"])
+            asset_name_idx = find_col_idx(["asset name", "asset_name", "asset"])
+            asset_type_idx = find_col_idx(["asset type", "asset_type", "type"])
+            currency_idx = find_col_idx(["currency"])
+            action_idx = find_col_idx(["action"])
+            quantity_idx = find_col_idx(["quantity", "qty"])
+            price_unit_idx = find_col_idx(["price/unit", "price_unit", "price unit", "price"])
+            why_idx = find_col_idx(["why", "decision", "reason"])
+            remark_idx = find_col_idx(["remark", "note"])
+            
+            for idx_row, row in df.iterrows():
+                ts_val = row.iloc[timestamp_idx] if timestamp_idx is not None else None
                 
-            try:
-                date_val = ""
-                raw_date = row.iloc[date_idx] if date_idx is not None else datetime.datetime.now()
-                if pd.notna(raw_date):
-                    if isinstance(raw_date, (datetime.datetime, datetime.date)):
-                        date_val = raw_date.strftime("%Y-%m-%d")
-                    else:
-                        date_val = str(raw_date).split(" ")[0].strip()
+                # If no timestamp column exists, construct a unique row signature to prevent duplicates
+                if pd.isna(ts_val) or ts_val is None:
+                    date_raw = row.iloc[date_idx] if date_idx is not None else ""
+                    asset_raw = row.iloc[asset_name_idx] if asset_name_idx is not None else ""
+                    action_raw = row.iloc[action_idx] if action_idx is not None else ""
+                    qty_raw = row.iloc[quantity_idx] if quantity_idx is not None else 0
+                    price_raw = row.iloc[price_unit_idx] if price_unit_idx is not None else 0
+                    ts_str = f"sig-{date_raw}-{asset_raw}-{action_raw}-{qty_raw}-{price_raw}".strip()
                 else:
-                    date_val = datetime.datetime.now().strftime("%Y-%m-%d")
-                
-                asset_name = str(row.iloc[asset_name_idx]).strip() if asset_name_idx is not None and pd.notna(row.iloc[asset_name_idx]) else ""
-                asset_type = str(row.iloc[asset_type_idx]).strip() if asset_type_idx is not None and pd.notna(row.iloc[asset_type_idx]) else "Thai Stock"
-                currency = str(row.iloc[currency_idx]).strip() if currency_idx is not None and pd.notna(row.iloc[currency_idx]) else "THB"
-                action = str(row.iloc[action_idx]).strip() if action_idx is not None and pd.notna(row.iloc[action_idx]) else "Buy"
-                
-                action = action.capitalize()
-                quantity = float(row.iloc[quantity_idx]) if quantity_idx is not None and pd.notna(row.iloc[quantity_idx]) else 0.0
-                price_unit = float(row.iloc[price_unit_idx]) if price_unit_idx is not None and pd.notna(row.iloc[price_unit_idx]) else 0.0
-                why = str(row.iloc[why_idx]).strip() if why_idx is not None and pd.notna(row.iloc[why_idx]) else ""
-                remark = str(row.iloc[remark_idx]).strip() if remark_idx is not None and pd.notna(row.iloc[remark_idx]) else ""
-                
-                if not asset_name:
+                    ts_str = str(ts_val).strip()
+                    
+                if ts_str in synced_set:
                     continue
                     
-                portfolios_list = db_data.get("portfolios", ["Main Trading", "BTC Stock", "Crypto"])
-                portfolio = portfolios_list[0] if portfolios_list else "Main Trading"
+                try:
+                    date_val = ""
+                    raw_date = row.iloc[date_idx] if date_idx is not None else datetime.datetime.now()
+                    if pd.notna(raw_date):
+                        if isinstance(raw_date, (datetime.datetime, datetime.date)):
+                            date_val = raw_date.strftime("%Y-%m-%d")
+                        else:
+                            date_val = str(raw_date).split(" ")[0].strip()
+                    else:
+                        date_val = datetime.datetime.now().strftime("%Y-%m-%d")
+                    
+                    asset_name = str(row.iloc[asset_name_idx]).strip() if asset_name_idx is not None and pd.notna(row.iloc[asset_name_idx]) else ""
+                    asset_type = str(row.iloc[asset_type_idx]).strip() if asset_type_idx is not None and pd.notna(row.iloc[asset_type_idx]) else "Thai Stock"
+                    currency = str(row.iloc[currency_idx]).strip() if currency_idx is not None and pd.notna(row.iloc[currency_idx]) else "THB"
+                    action = str(row.iloc[action_idx]).strip() if action_idx is not None and pd.notna(row.iloc[action_idx]) else "Buy"
+                    
+                    action = action.capitalize()
+                    quantity = float(row.iloc[quantity_idx]) if quantity_idx is not None and pd.notna(row.iloc[quantity_idx]) else 0.0
+                    price_unit = float(row.iloc[price_unit_idx]) if price_unit_idx is not None and pd.notna(row.iloc[price_unit_idx]) else 0.0
+                    why = str(row.iloc[why_idx]).strip() if why_idx is not None and pd.notna(row.iloc[why_idx]) else ""
+                    remark = str(row.iloc[remark_idx]).strip() if remark_idx is not None and pd.notna(row.iloc[remark_idx]) else ""
+                    
+                    if not asset_name:
+                        continue
+                        
+                    portfolios_list = db_data.get("portfolios", ["Main Trading", "BTC Stock", "Crypto"])
+                    portfolio = portfolios_list[0] if portfolios_list else "Main Trading"
+                    
+                    if asset_type.lower() == "crypto" and "Crypto" in portfolios_list:
+                        portfolio = "Crypto"
+                    elif asset_type.lower() in ["global stock", "us stock"] and "BTC Stock" in portfolios_list:
+                        portfolio = "BTC Stock"
+                    
+                    ids = [int(x["id"]) for x in trades_list if x["id"].isdigit()]
+                    next_id = str(max(ids) + 1) if ids else "1"
+                    
+                    new_trade = {
+                        "id": next_id,
+                        "date": date_val,
+                        "portfolio": portfolio,
+                        "assetName": asset_name,
+                        "assetType": asset_type,
+                        "currency": currency,
+                        "action": action,
+                        "quantity": quantity,
+                        "priceUnit": price_unit,
+                        "why": why,
+                        "remark": remark
+                    }
+                    
+                    trades_list.append(new_trade)
+                    
+                    trade_obj = Trade(
+                        id=next_id,
+                        date=date_val,
+                        portfolio=portfolio,
+                        assetName=asset_name,
+                        assetType=asset_type,
+                        currency=currency,
+                        action=action,
+                        quantity=quantity,
+                        priceUnit=price_unit,
+                        why=why,
+                        remark=remark
+                    )
+                    append_trade_to_excel(trade_obj)
+                    
+                    synced_timestamps.append(ts_str)
+                    synced_set.add(ts_str)
+                    new_trades_count += 1
+                    
+                except Exception as row_err:
+                    print(f"[Google Sheet Sync] Error parsing row {idx_row}: {row_err}")
                 
-                if asset_type.lower() == "crypto" and "Crypto" in portfolios_list:
-                    portfolio = "Crypto"
-                elif asset_type.lower() in ["global stock", "us stock"] and "BTC Stock" in portfolios_list:
-                    portfolio = "BTC Stock"
+        # Check if there are local trades that need to be uploaded to the cloud Google Sheet (auto-initialization)
+        apps_script_url = db_data.get("google_apps_script_url")
+        uploaded_count = 0
+        if apps_script_url:
+            local_trades = db_data.get("trades", [])
+            
+            for local_trade in local_trades:
+                # Construct signature for local trade: sig-date-assetName-action-quantity-priceUnit
+                date_val = local_trade.get("date", "")
+                asset_val = local_trade.get("assetName", "")
+                action_val = local_trade.get("action", "")
+                qty_val = local_trade.get("quantity", 0)
+                price_val = local_trade.get("priceUnit", 0)
                 
-                ids = [int(x["id"]) for x in trades_list if x["id"].isdigit()]
-                next_id = str(max(ids) + 1) if ids else "1"
+                # Check signature
+                sig = f"sig-{date_val}-{asset_val}-{action_val}-{qty_val}-{price_val}".strip()
                 
-                new_trade = {
-                    "id": next_id,
-                    "date": date_val,
-                    "portfolio": portfolio,
-                    "assetName": asset_name,
-                    "assetType": asset_type,
-                    "currency": currency,
-                    "action": action,
-                    "quantity": quantity,
-                    "priceUnit": price_unit,
-                    "why": why,
-                    "remark": remark
-                }
-                
-                trades_list.append(new_trade)
-                
-                trade_obj = Trade(
-                    id=next_id,
-                    date=date_val,
-                    portfolio=portfolio,
-                    assetName=asset_name,
-                    assetType=asset_type,
-                    currency=currency,
-                    action=action,
-                    quantity=quantity,
-                    priceUnit=price_unit,
-                    why=why,
-                    remark=remark
-                )
-                append_trade_to_excel(trade_obj)
-                
-                synced_timestamps.append(ts_str)
-                synced_set.add(ts_str)
-                new_trades_count += 1
-                
-            except Exception as row_err:
-                print(f"[Google Sheet Sync] Error parsing row {idx_row}: {row_err}")
-                
-        if new_trades_count > 0:
+                # If this local trade signature was not found in the Google Sheet, upload it!
+                if sig not in synced_set:
+                    print(f"[Google Sheet Sync] Uploading missing local trade to cloud sheet: {asset_val}...")
+                    payload = {
+                        "action": "addTrade",
+                        "trade": {
+                            "date": date_val,
+                            "portfolio": local_trade.get("portfolio", "Main Trading"),
+                            "assetName": asset_val,
+                            "assetType": local_trade.get("assetType", "Thai Stock"),
+                            "currency": local_trade.get("currency", "THB"),
+                            "action": action_val,
+                            "quantity": float(qty_val),
+                            "priceUnit": float(price_val),
+                            "why": local_trade.get("why", ""),
+                            "remark": local_trade.get("remark", "")
+                        }
+                    }
+                    try:
+                        resp = requests.post(apps_script_url, json=payload, timeout=10)
+                        if resp.status_code == 200:
+                            uploaded_count += 1
+                            synced_set.add(sig)
+                            synced_timestamps.append(sig)
+                        else:
+                            print(f"[Google Sheet Sync] Upload failed: HTTP {resp.status_code}")
+                    except Exception as upload_err:
+                        print(f"[Google Sheet Sync] Upload connection error: {upload_err}")
+                        
+            if uploaded_count > 0:
+                print(f"[Google Sheet Sync] Successfully uploaded {uploaded_count} local trades to the cloud Google Sheet.")
+        
+        # Save imports and synced status
+        if new_trades_count > 0 or uploaded_count > 0:
             db_data["trades"] = trades_list
             db_data["synced_google_form_timestamps"] = synced_timestamps
             save_db(db_data)
-            print(f"[Google Sheet Sync] Successfully imported {new_trades_count} new trades from Google Sheet.")
+            print(f"[Google Sheet Sync] Sync databases updated successfully.")
             price_cache["prices"] = {}
         else:
-            print("[Google Sheet Sync] No new trades found in Google Sheet.")
+            print("[Google Sheet Sync] No changes detected. Databases are in sync.")
             
         return True
     except Exception as e:
@@ -815,11 +889,21 @@ def save_google_sheet_settings(settings: GoogleSheetSettings):
     new_id = settings.google_sheet_id.strip()
     new_script_url = settings.google_apps_script_url.strip() if settings.google_apps_script_url else ""
     
+    # Auto-extract Google Sheet ID if the user pasted the entire URL
+    if "docs.google.com/spreadsheets" in new_id:
+        try:
+            new_id = new_id.split("/d/")[1].split("/")[0]
+            print(f"[Google Sheet Settings] Extracted clean Sheet ID: {new_id}")
+        except Exception as parse_err:
+            print(f"[Google Sheet Settings] Warning: Could not parse Sheet ID from URL: {parse_err}")
+            
     db_data["google_apps_script_url"] = new_script_url
     
     if old_id != new_id:
         db_data["google_sheet_id"] = new_id
         db_data["synced_google_form_timestamps"] = []
+    else:
+        db_data["google_sheet_id"] = new_id
         
     save_db(db_data)
         

@@ -235,7 +235,19 @@ function App() {
     try {
       const response = await axios.get(`${API_BASE}/api/google-sheet-settings`);
       setGoogleSheetId(response.data.google_sheet_id || '');
-      setGoogleAppsScriptUrl(response.data.google_apps_script_url || '');
+      if (response.data.google_apps_script_url) {
+        setGoogleAppsScriptUrl(response.data.google_apps_script_url);
+        localStorage.setItem('google_apps_script_url', response.data.google_apps_script_url);
+      } else {
+        const localUrl = localStorage.getItem('google_apps_script_url') || '';
+        if (localUrl) {
+          setGoogleAppsScriptUrl(localUrl);
+          axios.post(`${API_BASE}/api/google-sheet-settings`, {
+            google_sheet_id: response.data.google_sheet_id || '',
+            google_apps_script_url: localUrl
+          }).catch(err => console.error("Auto-syncing script URL to backend failed:", err));
+        }
+      }
       setGoogleSheetSyncCount(response.data.synced_count || 0);
     } catch (error) {
       console.error('Error fetching Google Sheet settings:', error);
