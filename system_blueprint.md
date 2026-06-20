@@ -421,4 +421,23 @@ Storing custom portfolio mappings and custom portfolio lists client-side in brow
 
 **Commit:** `7071e62` — `Feature: added validation proxy, passcode lock screen, trade strategy editor, trader analytics card, and user manual`
 
+---
 
+### [2026-06-20] — Fix: Temporal Dead Zone JavaScript Crash causing Blank (Black) Screen
+
+**Symptom:**
+When loading the Trading Journal app in Cloud Mode or locally, the interface was completely blank (black screen). No errors were logged in the UI, but the browser console showed a `ReferenceError: Cannot access 'filteredTrades' before initialization`.
+
+**Root Cause:**
+In `frontend/src/App.jsx`, the `tradingAnalytics` useMemo hook was declared at line 273 and referenced `filteredTrades`. However, `filteredTrades` was declared much later in the file (around line 737). This caused a Temporal Dead Zone (TDZ) JavaScript crash, preventing the React component from mounting.
+
+**Fixes Applied:**
+1. Relocated the `tradingAnalytics` useMemo hook definition so it resides immediately after the `filteredTrades` hook declaration. This ensures `filteredTrades` is defined and initialized before it is referenced.
+2. Rebuilt the production application bundle (`npm run build`).
+3. Re-deployed the corrected build to the `gh-pages` branch on GitHub Pages.
+
+**Files Changed:**
+- `frontend/src/App.jsx`
+- `system_blueprint.md`
+
+**Commit:** `269284d` — `Fix Temporal Dead Zone ReferenceError by relocating tradingAnalytics hook`
