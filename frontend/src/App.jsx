@@ -1207,7 +1207,7 @@ function App() {
       const formattedDate = values.date.format('YYYY-MM-DD');
       
       const newTrade = {
-        id: (trades.length + 1).toString(),
+        id: api.type === 'cloud' ? (trades.length + 2).toString() : (trades.length + 1).toString(),
         date: formattedDate,
         portfolio: values.portfolio,
         assetName: symbol,

@@ -555,3 +555,20 @@ Fix a bug where clicking "Sync Markets" in the Cloud Mode UI fails and displays 
 - `frontend/src/App.jsx`
 - `github_sheets_serverless_deployment_guide.md`
 - `system_blueprint.md`
+
+---
+
+### [2026-06-20] — Fix: Duplicate Trade Rendering in UI due to Key Collision on Sheet-Backed Cloud Mode
+
+**Request:**
+Fix a bug where adding a trade displays duplicate transactions in the Trading Journal table immediately after submission, but corrects itself to a single transaction once the user switches tabs or refetches.
+
+**Root Cause:**
+In Cloud Mode (Google Sheets), the trades list is fetched directly from the sheet via a CSV export where trade IDs are set dynamically to their row numbers (starting at row 2, e.g. IDs `"2"`, `"3"`, ..., `"N+1"`). When manually appending `newTrade` to the React state immediately after form submission (to give immediate visual feedback), the frontend generated the ID as `(trades.length + 1).toString()`. If there were 10 trades, the manually added trade got ID `"11"`, which collided with the existing 10th trade's ID (row 11). This duplicate key `"11"` confused React's rendering engine, causing the new trade card/row to be rendered twice. Once the user navigated away or refetched, the state was replaced with the actual row-index IDs from the sheet (`"2"` to `"12"`), resolving the key collision and removing the duplicate DOM node.
+
+**Fixes & Enhancements Applied:**
+* **Dynamic ID Offset:** Modified `handleAddTrade` in `frontend/src/App.jsx` to assign `trades.length + 2` as the temporary ID in Cloud Mode (accounting for the header row offset), and `trades.length + 1` in Local Mode. This aligns the client-side optimistic update ID with the actual spreadsheet row number, preventing React key collisions.
+
+**Files Changed:**
+- `frontend/src/App.jsx`
+- `system_blueprint.md`
