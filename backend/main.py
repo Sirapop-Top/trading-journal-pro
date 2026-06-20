@@ -87,6 +87,10 @@ def get_ticker_symbol(asset_name: str, asset_type: str) -> str:
     if asset_type.strip().lower() == "thai stock" and not name_upper.endswith(".BK"):
         return f"{name_upper}.BK"
         
+    # If it is a Crypto and doesn't contain a dash (e.g. BTC-USD), append -USD
+    if asset_type.strip().lower() == "crypto" and "-" not in name_upper:
+        return f"{name_upper}-USD"
+        
     return asset_name
 
 def load_db():

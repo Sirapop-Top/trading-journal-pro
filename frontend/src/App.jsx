@@ -2355,7 +2355,7 @@ function App() {
               <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                 <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: 'var(--accent-gradient)', boxShadow: '0 0 8px rgba(0,242,254,0.6)' }}></div>
                 <span style={{ color: '#ffffff', fontFamily: 'var(--font-family-ui)', fontWeight: 950, fontSize: '13px', letterSpacing: '0.5px' }}>
-                  ALPHA<span style={{ color: 'var(--primary-color)' }}>TRADER</span>
+                  {isMobile ? 'A' : 'ALPHA'}<span style={{ color: 'var(--primary-color)' }}>{isMobile ? 'T' : 'TRADER'}</span>
                 </span>
                 <Select
                   value={activePortfolio}
@@ -3579,16 +3579,58 @@ function App() {
 
                               <div className="mobile-feed-card-footer">
                                 <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>Category: {trade.assetType}</span>
-                                <Popconfirm
-                                  title="Delete Trade"
-                                  description="Are you sure you want to delete this trade?"
-                                  onConfirm={() => handleDeleteTrade(trade.id)}
-                                  okText="Delete"
-                                  cancelText="Cancel"
-                                  okButtonProps={{ danger: true }}
-                                >
-                                  <Button type="text" danger icon={<DeleteOutlined />} size="small" style={{ padding: 0 }} />
-                                </Popconfirm>
+                                <Space size="middle">
+                                  <Button 
+                                    type="text" 
+                                    icon={<EditOutlined style={{ color: 'var(--primary-color)' }} />} 
+                                    size="small" 
+                                    title="Edit Strategy"
+                                    onClick={() => {
+                                      const standardStrategies = [
+                                        "CDC Action Zone",
+                                        "Breakout",
+                                        "EMA Cross",
+                                        "Support/Resistance Bounce",
+                                        "Value Investment",
+                                        "Rebalance"
+                                      ];
+                                      const isCustom = trade.why && !standardStrategies.includes(trade.why);
+                                      setEditingTrade(trade);
+                                      setIsCustomStrategy(isCustom);
+                                      editStrategyForm.setFieldsValue({
+                                        why: isCustom ? 'Other' : (trade.why || undefined),
+                                        customWhy: isCustom ? trade.why : '',
+                                        remark: trade.remark
+                                      });
+                                      setIsEditStrategyModalOpen(true);
+                                    }}
+                                    style={{ padding: 0 }}
+                                  />
+                                  <Button 
+                                    type="text" 
+                                    icon={<SwapOutlined style={{ color: 'var(--warning-color)' }} />} 
+                                    size="small" 
+                                    title="Transfer Portfolio"
+                                    onClick={() => {
+                                      setEditingTrade(trade);
+                                      transferForm.setFieldsValue({
+                                        targetPortfolio: trade.portfolio
+                                      });
+                                      setIsTransferModalOpen(true);
+                                    }}
+                                    style={{ padding: 0 }}
+                                  />
+                                  <Popconfirm
+                                    title="Delete Trade"
+                                    description="Are you sure you want to delete this trade?"
+                                    onConfirm={() => handleDeleteTrade(trade.id)}
+                                    okText="Delete"
+                                    cancelText="Cancel"
+                                    okButtonProps={{ danger: true }}
+                                  >
+                                    <Button type="text" danger icon={<DeleteOutlined />} size="small" style={{ padding: 0 }} />
+                                  </Popconfirm>
+                                </Space>
                               </div>
                             </div>
                           );
@@ -4363,7 +4405,7 @@ function App() {
             }}
           >
             <Row gutter={16}>
-              <Col span={12}>
+              <Col xs={24} sm={12}>
                 <Form.Item
                   name="date"
                   label="Transaction Date"
@@ -4373,7 +4415,7 @@ function App() {
                 </Form.Item>
               </Col>
               
-              <Col span={12}>
+              <Col xs={24} sm={12}>
                 <Form.Item
                   name="portfolio"
                   label="Select Portfolio Target"
@@ -4389,7 +4431,7 @@ function App() {
             </Row>
 
             <Row gutter={16}>
-              <Col span={12}>
+              <Col xs={24} sm={12}>
                 <Form.Item
                   name="assetName"
                   label="Asset Name (Ticker)"
@@ -4447,7 +4489,7 @@ function App() {
                 </Form.Item>
               </Col>
               
-              <Col span={12}>
+              <Col xs={24} sm={12}>
                 <Form.Item
                   name="assetType"
                   label="Asset Category"
@@ -4465,7 +4507,7 @@ function App() {
             </Row>
 
             <Row gutter={16}>
-              <Col span={8}>
+              <Col xs={24} sm={8}>
                 <Form.Item
                   name="action"
                   label="Action"
@@ -4498,7 +4540,7 @@ function App() {
                 </div>
               </Col>
 
-              <Col span={8}>
+              <Col xs={24} sm={8}>
                 <Form.Item
                   name="currency"
                   label="Local Currency"
@@ -4512,7 +4554,7 @@ function App() {
                 </Form.Item>
               </Col>
 
-              <Col span={8}>
+              <Col xs={24} sm={8}>
                 <Form.Item
                   name="quantity"
                   label="Quantity"
@@ -4524,7 +4566,7 @@ function App() {
             </Row>
 
             <Row gutter={16}>
-              <Col span={12}>
+              <Col xs={24} sm={12}>
                 <Form.Item
                   name="priceUnit"
                   label="Price / Unit (Local)"
@@ -4534,7 +4576,7 @@ function App() {
                 </Form.Item>
               </Col>
               
-              <Col span={12}>
+              <Col xs={24} sm={12}>
                 <Form.Item
                   name="why"
                   label="Strategy / Decision Reason"

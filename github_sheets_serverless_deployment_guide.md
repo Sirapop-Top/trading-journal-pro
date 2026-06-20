@@ -290,7 +290,12 @@ function fetchPriceFromYahoo(asset) {
   if (tickerMap[upperAsset]) {
     symbol = tickerMap[upperAsset];
   } else {
-    if (upperAsset.length <= 5 && upperAsset !== "BTC" && upperAsset !== "ETH") {
+    // If it's a known crypto asset, append -USD
+    if (upperAsset === "BTC" || upperAsset === "ETH" || upperAsset === "SOL" || upperAsset === "BNB" || upperAsset === "XRP" || upperAsset === "ADA" || upperAsset === "DOGE" || upperAsset === "DOT") {
+      var price = fetchRateFromYahoo(upperAsset + "-USD");
+      if (price) return price;
+    }
+    if (upperAsset.length <= 5) {
       var price = fetchRateFromYahoo(upperAsset + ".BK");
       if (price) return price;
     }
@@ -574,6 +579,8 @@ function validateTicker(symbol, assetType) {
   } else {
     if (assetType.toLowerCase() === "thai stock" && !resolvedSymbol.endsWith(".BK")) {
       resolvedSymbol = resolvedSymbol + ".BK";
+    } else if (assetType.toLowerCase() === "crypto" && resolvedSymbol.indexOf("-") === -1) {
+      resolvedSymbol = resolvedSymbol + "-USD";
     }
   }
   
