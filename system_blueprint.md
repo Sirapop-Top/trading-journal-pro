@@ -471,3 +471,28 @@ In `frontend/src/App.jsx`, the `tradingAnalytics` useMemo hook was declared at l
 - `system_blueprint.md`
 
 **Commit:** `0122240` — `Feature: added log out buttons, custom strategy dropdown, and trade-level transfers`
+
+---
+
+### [2026-06-20] — Fix: Crypto Ticker Verification & Mobile Responsive UI Layout Redesign
+
+**Request:**
+1. Fix ticker validation so that crypto assets (e.g. BTC, ETH) verify successfully on Yahoo Finance.
+2. Redesign the mobile view to make it more user-friendly and fully functional.
+
+**Fixes & Enhancements Applied:**
+1. **Crypto Ticker Validation & Pricing Mapping:**
+   - **Backend API:** Updated `get_ticker_symbol` in `backend/main.py` to check for `crypto` asset types and automatically append `-USD` to the symbol (e.g., `BTC` -> `BTC-USD`, `ETH` -> `ETH-USD`) if it doesn't already contain a dash.
+   - **Apps Script Guide:** Updated the Google Apps Script `validateTicker` and `fetchPriceFromYahoo` functions in `github_sheets_serverless_deployment_guide.md` with the same suffix mapping to support seamless verification and live price queries in Cloud Mode.
+2. **Mobile Layout & Usability Redesign:**
+   - **Mobile Actions Column:** Embedded the newly created **Edit Strategy** and **Transfer Portfolio** buttons directly into the action footer of each trade card in the mobile log list feed. Mobile users now have full feature parity with desktop users for transaction modifications.
+   - **Responsive Form Fields:** Redesigned the hardcoded column grids in the Log New Trade Modal (`Row` and `Col` elements) to use stacking responsive sizes (`xs={24} sm={12}`). On phone screens, input fields stack vertically for easy touch navigation.
+   - **Header Overflow Protection:** Abbreviated the mobile header branding title to `AT` instead of `ALPHATRADER` on small screens. This frees up horizontal space and guarantees the portfolio, currency, eye censor, passcode, and sync buttons fit on one line on narrow screens without wrapping.
+
+**Files Changed:**
+- `backend/main.py`
+- `frontend/src/App.jsx`
+- `github_sheets_serverless_deployment_guide.md`
+- `system_blueprint.md`
+
+**Commit:** `92a5879` — `Fix: crypto ticker validation and responsive mobile layout updates`
