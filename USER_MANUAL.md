@@ -85,9 +85,9 @@ To keep calculations accurate, AlphaTrader validates symbols against Yahoo Finan
 3. Enter the ticker symbol:
    * **Thai Stocks:** Key in standard symbols (e.g. `BJC`, `KCE`). The system automatically appends `.BK` under the hood.
    * **Global Stocks:** Key in directly (e.g. `MSTR`, `TSLA`).
-   * **Crypto Assets:** Key in standard tokens (e.g. `BTC`, `ETH`, `SOL`). The system automatically appends `-USD` (e.g. `BTC-USD`) under the hood to query live rates from Yahoo Finance.
+   * **Crypto Assets:** Key in standard tokens (e.g. `BTC`, `ETH`). When selecting the **Crypto** asset category, the app automatically appends `-USD` (e.g. `BTC` becomes `BTC-USD`) and auto-corrects the form field. This prevents Yahoo Finance validation from colliding with global stock ETFs (such as NYSE ClearShares Piton ETF `BTC`) and ensures the correct crypto pair is queried.
 4. Click **Verify** next to the Asset Name field:
-   * **Green Check:** Verified on Yahoo Finance! Live market prices will load dynamically.
+   * **Green Check:** Verified on Yahoo Finance! The corrected ticker name is saved, and live market prices will load dynamically.
    * **Red Cross:** Invalid ticker. Checks will run again if you attempt to submit.
    * **Offline Override:** If the verification server is unreachable, a confirmation dialog will prompt: *"Verification Unreachable. Do you want to log this trade anyway?"* Select **Log Anyway** if you are offline and certain the symbol is correct.
 
