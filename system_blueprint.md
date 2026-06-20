@@ -535,3 +535,23 @@ Fix a bug where typing `BTC` in the Asset Name with the category set to `Crypto`
 - `frontend/src/App.jsx`
 - `github_sheets_serverless_deployment_guide.md`
 - `system_blueprint.md`
+
+---
+
+### [2026-06-20] — Fix: Apps Script sync getData ReferenceError and Client URL Safeguard
+
+**Request:**
+Fix a bug where clicking "Sync Markets" in the Cloud Mode UI fails and displays a "Failed to sync live market data. Checking cache." popup.
+
+**Root Causes:**
+1. **JavaScript ReferenceError in Apps Script:** The previous refinement introduced `assetTypesMap` in the `getDashboardData` function in the deployment guide, but it was used without being declared via `var`/`let`. This triggered a runtime `ReferenceError: assetTypesMap is not defined` in Google Apps Script, breaking the Web App's `action=getData` endpoint.
+2. **Missing Frontend URL Verification:** If a user runs in Cloud Mode but has not configured the Google Apps Script Web App URL, clicking "Sync Markets" triggered a failed fetch request on an empty string rather than providing a clear configuration error.
+
+**Fixes & Enhancements Applied:**
+1. **Apps Script ReferenceError Fix:** Declared `var assetTypesMap = {};` at the start of the `getDashboardData` function in `github_sheets_serverless_deployment_guide.md` and cleaned up its assignments.
+2. **Frontend URL Configuration Safeguard:** Added a check to `syncMarketData` in `frontend/src/App.jsx` to throw a descriptive error if the Apps Script URL is empty or unconfigured before trying to communicate with the cloud.
+
+**Files Changed:**
+- `frontend/src/App.jsx`
+- `github_sheets_serverless_deployment_guide.md`
+- `system_blueprint.md`

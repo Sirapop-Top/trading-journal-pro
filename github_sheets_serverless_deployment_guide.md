@@ -146,6 +146,7 @@ function getDashboardData() {
   var trades = [];
   var portfolios = ["Main Trading", "BTC Stock", "Crypto"];
   var uniqueAssets = [];
+  var assetTypesMap = {};
   
   if (rows.length <= 1) {
     return {
@@ -232,7 +233,6 @@ function getDashboardData() {
     
     if (uniqueAssets.indexOf(assetName) === -1) {
       uniqueAssets.push(assetName);
-      assetTypesMap = assetTypesMap || {};
       assetTypesMap[assetName] = assetType;
     }
     

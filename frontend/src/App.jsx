@@ -518,6 +518,9 @@ function App() {
     try {
       const api = getApiUrl('/api/sync');
       if (api.type === 'cloud') {
+        if (!api.url) {
+          throw new Error('Google Apps Script URL is not configured in Settings.');
+        }
         const data = await callGoogleAppsScript(`${api.url}?action=getData`);
         setLivePrices(data.livePrices || {});
         setLiveRates(data.liveRates || { THB: 1.0, USD: 32.69, EUR: 38.04 });
