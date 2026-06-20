@@ -56,6 +56,9 @@ class TradeStrategyUpdate(BaseModel):
     why: str
     remark: Optional[str] = ""
 
+class TradeTransfer(BaseModel):
+    targetPortfolio: str
+
 
 
 # In-memory cache for Yahoo Finance prices to prevent hitting limits and provide fast responses
@@ -146,10 +149,12 @@ def load_from_excel_and_save():
             why = str(row.get("Why (Decision Reason)", "")) if pd.notna(row.get("Why (Decision Reason)")) else ""
             remark = str(row.get("Remark", "")) if pd.notna(row.get("Remark")) and str(row.get("Remark")) != "nan" else ""
             
-            # Default to Main Investment unless it looks like crypto
-            portfolio = "Main Investment"
-            if asset_type.lower() == "crypto":
-                portfolio = "Crypto"
+            # Default to Main Investment unless it looks like crypto or specified in Excel
+            portfolio = str(row.get("Portfolio", "")) if pd.notna(row.get("Portfolio")) else ""
+            if not portfolio:
+                portfolio = "Main Investment"
+                if asset_type.lower() == "crypto":
+                    portfolio = "Crypto"
 
             trade = {
                 "id": str(index + 1),
@@ -239,6 +244,11 @@ def append_trade_to_excel(trade: Trade):
         
         sheet.cell(row=new_row, column=13, value=trade.why)
         sheet.cell(row=new_row, column=14, value=trade.remark or "")
+        
+        # Write portfolio
+        if sheet.cell(row=1, column=15).value is None:
+            sheet.cell(row=1, column=15, value="Portfolio")
+        sheet.cell(row=new_row, column=15, value=trade.portfolio)
         
         wb.save(EXCEL_PATH)
         print(f"Appended trade ID {trade.id} to Excel.")
@@ -661,6 +671,32 @@ def transfer_position(payload: PositionTransfer):
         "message": f"Successfully transferred {asset_name} position ({moved_count} trades) from '{source}' to '{target}'."
     }
 
+@app.put("/api/trades/{trade_id}/transfer")
+def transfer_trade(trade_id: str, payload: TradeTransfer):
+    db_data = load_db()
+    portfolios = db_data.get("portfolios", [])
+    trades = db_data.get("trades", [])
+    
+    target = payload.targetPortfolio.strip()
+    if target not in portfolios:
+        raise HTTPException(status_code=404, detail=f"Target portfolio '{target}' not found")
+        
+    found = False
+    for trade in trades:
+        if trade.get("id") == trade_id:
+            trade["portfolio"] = target
+            found = True
+            break
+            
+    if not found:
+        raise HTTPException(status_code=404, detail=f"Trade with ID '{trade_id}' not found")
+        
+    db_data["trades"] = trades
+    save_db(db_data)
+    rewrite_excel_from_db(trades)
+    
+    return {"success": True, "trade_id": trade_id, "new_portfolio": target}
+
 def rewrite_excel_from_db(trades_list):
     """Rewrites the Excel 'Journal' sheet from the list of trades to keep them in sync."""
     if not os.path.exists(EXCEL_PATH):
@@ -675,6 +711,8 @@ def rewrite_excel_from_db(trades_list):
         # Clear existing rows except headers (row 1)
         while sheet.max_row > 1:
             sheet.delete_rows(2)
+            
+        sheet.cell(row=1, column=15, value="Portfolio")
             
         for index, trade in enumerate(trades_list):
             row = index + 2
@@ -702,6 +740,7 @@ def rewrite_excel_from_db(trades_list):
             
             sheet.cell(row=row, column=13, value=trade["why"])
             sheet.cell(row=row, column=14, value=trade["remark"] or "")
+            sheet.cell(row=row, column=15, value=trade.get("portfolio", ""))
             
         wb.save(EXCEL_PATH)
         print("Excel rewritten from db state.")

@@ -129,6 +129,9 @@ function doPost(e) {
   } else if (action === "updateTradeStrategy") {
     return ContentService.createTextOutput(JSON.stringify(updateTradeStrategy(contents.tradeId, contents.why, contents.remark)))
       .setMimeType(ContentService.MimeType.JSON);
+  } else if (action === "updateTradePortfolio") {
+    return ContentService.createTextOutput(JSON.stringify(updateTradePortfolio(contents.tradeId, contents.targetPortfolio)))
+      .setMimeType(ContentService.MimeType.JSON);
   }
   
   // Fallback for legacy direct form uploads
@@ -330,6 +333,13 @@ function addTrade(trade) {
   writeCell(["price/unit", "price_unit", "price unit", "price"], trade.priceUnit);
   writeCell(["why (decision reason)", "why", "decision", "reason"], trade.why);
   writeCell(["remark", "note"], trade.remark || "");
+  
+  var portWritten = writeCell(["portfolio", "port"], trade.portfolio || "Main Trading");
+  if (portWritten === -1 && trade.portfolio) {
+    var newCol = sheet.getLastColumn() + 1;
+    sheet.getRange(1, newCol).setValue("Portfolio");
+    sheet.getRange(newRowIdx, newCol).setValue(trade.portfolio);
+  }
   
   // Try to write formulas dynamically for computed columns (Amount, Current Value, P&L, etc.)
   var qtyIdx = findIdxInArray(headersLower, ["quantity", "qty"]);
@@ -606,6 +616,30 @@ function updateTradeStrategy(tradeId, why, remark) {
     }
     if (remarkIdx !== -1) {
       sheet.getRange(rowIdx, remarkIdx + 1).setValue(remark || "");
+    }
+    return { success: true };
+  }
+  
+  return { success: false, error: "Row index out of range: " + rowIdx + " (lastRow=" + lastRow + ")" };
+}
+
+function updateTradePortfolio(tradeId, targetPortfolio) {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Journal");
+  var rowIdx = parseInt(tradeId);
+  var lastRow = sheet.getLastRow();
+  
+  if (rowIdx > 1 && rowIdx <= lastRow) {
+    var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+    var headersLower = headers.map(function(h) { return h.toString().toLowerCase().trim(); });
+    
+    var portIdx = findIdxInArray(headersLower, ["portfolio", "port"]);
+    if (portIdx !== -1) {
+      sheet.getRange(rowIdx, portIdx + 1).setValue(targetPortfolio);
+    } else {
+      // If Portfolio column doesn't exist, create it dynamically
+      var newCol = sheet.getLastColumn() + 1;
+      sheet.getRange(1, newCol).setValue("Portfolio");
+      sheet.getRange(rowIdx, newCol).setValue(targetPortfolio);
     }
     return { success: true };
   }

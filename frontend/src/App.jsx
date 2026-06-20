@@ -27,7 +27,8 @@ import {
   EyeOutlined,
   EyeInvisibleOutlined,
   LockOutlined,
-  EditOutlined
+  EditOutlined,
+  LogoutOutlined
 } from '@ant-design/icons';
 import { 
   AreaChart, Area, PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend,
@@ -230,6 +231,7 @@ function App() {
   const [isEditStrategyModalOpen, setIsEditStrategyModalOpen] = useState(false);
   const [editingTrade, setEditingTrade] = useState(null);
   const [editStrategyForm] = Form.useForm();
+  const [isCustomStrategy, setIsCustomStrategy] = useState(false);
 
   // Lockout Timer Cooldown
   useEffect(() => {
@@ -326,6 +328,7 @@ function App() {
     const priceUnitIdx = findColIdx(["price/unit", "price_unit", "price unit", "price"]);
     const whyIdx = findColIdx(["why", "decision", "reason"]);
     const remarkIdx = findColIdx(["remark", "note"]);
+    const portfolioIdx = findColIdx(["portfolio", "port"]);
     
     const loadedTrades = [];
     const loadedPortfolios = new Set();
@@ -405,15 +408,19 @@ function App() {
       const assetType = assetTypeIdx !== -1 && row[assetTypeIdx] ? row[assetTypeIdx].toString().trim() : "";
       
       let portfolio = "Main Trading";
-      if (assetType.toLowerCase() === "crypto") {
+      if (portfolioIdx !== -1 && row[portfolioIdx]) {
+        portfolio = row[portfolioIdx].toString().trim();
+      } else if (assetType.toLowerCase() === "crypto") {
         portfolio = "Crypto";
       } else if (assetType.toLowerCase() === "global stock" || assetType.toLowerCase() === "us stock") {
         portfolio = "BTC Stock";
       }
       
       // Apply custom overrides
-      if (customMappings[assetName]) {
-        portfolio = customMappings[assetName];
+      if (portfolioIdx === -1 || !row[portfolioIdx]) {
+        if (customMappings[assetName]) {
+          portfolio = customMappings[assetName];
+        }
       }
       
       const qty = quantityIdx !== -1 ? parseFloat(row[quantityIdx]) : 0;
@@ -1277,9 +1284,10 @@ function App() {
     setIsSyncing(true);
     try {
       const api = getApiUrl(`/api/trades/${editingTrade.id}/strategy`);
+      const finalWhy = values.why === 'Other' ? (values.customWhy || '') : values.why;
       
       const updatedData = {
-        why: values.why,
+        why: finalWhy,
         remark: values.remark || ''
       };
       
@@ -1297,6 +1305,7 @@ function App() {
         setTrades(prev => prev.map(t => t.id === editingTrade.id ? { ...t, ...updatedData } : t));
         setIsEditStrategyModalOpen(false);
         setEditingTrade(null);
+        setIsCustomStrategy(false);
         editStrategyForm.resetFields();
         fetchData();
       } else {
@@ -1304,6 +1313,7 @@ function App() {
         message.success(`Trade strategy updated successfully.`);
         setIsEditStrategyModalOpen(false);
         setEditingTrade(null);
+        setIsCustomStrategy(false);
         editStrategyForm.resetFields();
         setTrades(prev => prev.map(t => t.id === response.data.id ? response.data : t));
         syncMarketData(true);
@@ -1501,47 +1511,45 @@ function App() {
     }
   };
 
-  // Transfer whole position trades to another portfolio
-  const handleTransferPosition = async (values) => {
+  // Transfer individual trade to another portfolio
+  const handleTransferTrade = async (values) => {
+    if (!editingTrade) return;
+    setIsSyncing(true);
     try {
-      const api = getApiUrl('/api/portfolios/transfer-position');
+      const api = getApiUrl(`/api/trades/${editingTrade.id}/transfer`);
       const targetPortfolio = values.targetPortfolio;
       
       if (api.type === 'cloud') {
-        // Save portfolio override mapping for this asset in localStorage
-        const customMappings = JSON.parse(localStorage.getItem('alphatrader_portfolio_mappings') || '{}');
-        customMappings[transferTargetAsset] = targetPortfolio;
-        localStorage.setItem('alphatrader_portfolio_mappings', JSON.stringify(customMappings));
-
-        // Sync with Google Sheet Apps Script in the background
-        if (api.url) {
-          try {
-            await callGoogleAppsScript(api.url, {
-              action: "transferPosition",
-              assetName: transferTargetAsset,
-              targetPortfolio: targetPortfolio
-            });
-          } catch (cloudErr) {
-            console.error("Error syncing transferPosition to cloud:", cloudErr);
-          }
+        if (!api.url) {
+          throw new Error('Apps Script URL is missing in Cloud Mode.');
         }
-
-        message.success(`Successfully transferred ${transferTargetAsset} position to '${targetPortfolio}'.`);
-        setIsTransferModalOpen(false);
-        await fetchData();
-      } else {
-        const response = await axios.put(`${API_BASE}/api/portfolios/transfer-position`, {
-          assetName: transferTargetAsset,
-          sourcePortfolio: transferSourcePortfolio,
+        await callGoogleAppsScript(api.url, {
+          action: "updateTradePortfolio",
+          tradeId: editingTrade.id,
           targetPortfolio: targetPortfolio
         });
-        message.success(response.data.message);
+        message.success(`Trade transferred to '${targetPortfolio}' successfully on Google Sheets.`);
+        setTrades(prev => prev.map(t => t.id === editingTrade.id ? { ...t, portfolio: targetPortfolio } : t));
         setIsTransferModalOpen(false);
-        await fetchData();
+        setEditingTrade(null);
+        transferForm.resetFields();
+        fetchData();
+      } else {
+        const response = await axios.put(api.url, {
+          targetPortfolio: targetPortfolio
+        });
+        message.success(`Trade transferred successfully.`);
+        setIsTransferModalOpen(false);
+        setEditingTrade(null);
+        transferForm.resetFields();
+        setTrades(prev => prev.map(t => t.id === editingTrade.id ? { ...t, portfolio: targetPortfolio } : t));
+        syncMarketData(true);
       }
     } catch (error) {
-      console.error('Error transferring position:', error);
-      message.error(error.response?.data?.detail || 'Failed to transfer position.');
+      console.error('Error transferring trade:', error);
+      message.error(error.response?.data?.detail || 'Failed to transfer trade.');
+    } finally {
+      setIsSyncing(false);
     }
   };
 
@@ -1755,20 +1763,45 @@ function App() {
       title: 'Actions',
       key: 'actions',
       align: 'center',
-      width: 100,
+      width: 130,
       render: (_, record) => (
         <Space size="middle">
           <Button 
             type="text" 
             icon={<EditOutlined style={{ color: 'var(--primary-color)' }} />} 
             size="small" 
+            title="Edit Strategy"
             onClick={() => {
+              const standardStrategies = [
+                "CDC Action Zone",
+                "Breakout",
+                "EMA Cross",
+                "Support/Resistance Bounce",
+                "Value Investment",
+                "Rebalance"
+              ];
+              const isCustom = record.why && !standardStrategies.includes(record.why);
               setEditingTrade(record);
+              setIsCustomStrategy(isCustom);
               editStrategyForm.setFieldsValue({
-                why: record.why,
+                why: isCustom ? 'Other' : (record.why || undefined),
+                customWhy: isCustom ? record.why : '',
                 remark: record.remark
               });
               setIsEditStrategyModalOpen(true);
+            }}
+          />
+          <Button 
+            type="text" 
+            icon={<SwapOutlined style={{ color: 'var(--warning-color)' }} />} 
+            size="small" 
+            title="Transfer Trade to Portfolio"
+            onClick={() => {
+              setEditingTrade(record);
+              transferForm.setFieldsValue({
+                targetPortfolio: record.portfolio
+              });
+              setIsTransferModalOpen(true);
             }}
           />
           <Popconfirm
@@ -1924,37 +1957,6 @@ function App() {
           </span>
         );
       }
-    },
-    {
-      title: 'Action',
-      key: 'position_transfer_action',
-      align: 'center',
-      width: 120,
-      render: (_, record) => {
-        if (record.qtyHeld <= 0) return null;
-        if (activePortfolio === 'All Portfolios') {
-          return (
-            <Text type="secondary" style={{ fontSize: '11px', fontStyle: 'italic', color: 'var(--text-muted)' }}>
-              Select portfolio
-            </Text>
-          );
-        }
-        return (
-          <Button
-            type="text"
-            icon={<SwapOutlined />}
-            style={{ color: 'var(--primary-color)', fontWeight: 'bold' }}
-            onClick={() => {
-              setTransferTargetAsset(record.assetName);
-              setTransferSourcePortfolio(activePortfolio);
-              transferForm.resetFields();
-              setIsTransferModalOpen(true);
-            }}
-          >
-            Transfer
-          </Button>
-        );
-      }
     }
   ];
 
@@ -2040,6 +2042,27 @@ function App() {
                 }}
               >
                 Connect Journal
+              </Button>
+
+              <Button 
+                danger
+                block 
+                size="large"
+                icon={<LogoutOutlined />}
+                style={{ fontWeight: 'bold' }}
+                onClick={() => {
+                  localStorage.removeItem('google_sheet_id');
+                  localStorage.removeItem('google_apps_script_url');
+                  localStorage.removeItem('alphatrader_passcode');
+                  localStorage.removeItem('alphatrader_autolock');
+                  setGoogleSheetId('');
+                  setGoogleAppsScriptUrl('');
+                  setAppPasscode('');
+                  setIsConnected(false);
+                  message.success('Cleared all connection settings and logged out.');
+                }}
+              >
+                Clear Settings & Log Out
               </Button>
 
               <Alert 
@@ -3790,22 +3813,6 @@ function App() {
 
                               <div className="mobile-feed-card-footer">
                                 <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>Cost: {formatCurrency(pos.totalCostConverted, displayCurrency)}</span>
-                                {pos.qtyHeld > 0 && activePortfolio !== 'All Portfolios' && (
-                                  <Button
-                                    type="text"
-                                    icon={<SwapOutlined />}
-                                    size="small"
-                                    style={{ color: 'var(--primary-color)', fontWeight: 'bold', padding: 0 }}
-                                    onClick={() => {
-                                      setTransferTargetAsset(pos.assetName);
-                                      setTransferSourcePortfolio(activePortfolio);
-                                      transferForm.resetFields();
-                                      setIsTransferModalOpen(true);
-                                    }}
-                                  >
-                                    Transfer
-                                  </Button>
-                                )}
                               </div>
                             </div>
                           );
@@ -4073,7 +4080,7 @@ function App() {
                       </div>
 
                       {googleSheetId && (
-                        <div style={{ display: 'flex', gap: '15px', alignItems: 'center', borderTop: '1px solid var(--border-color)', paddingTop: '16px', marginTop: '5px' }}>
+                        <div style={{ display: 'flex', gap: '15px', alignItems: 'center', borderTop: '1px solid var(--border-color)', paddingTop: '16px', marginTop: '5px', flexWrap: 'wrap' }}>
                           <Button 
                             icon={<SyncOutlined spin={isSyncingSheet} />} 
                             onClick={handleSyncGoogleSheet}
@@ -4081,6 +4088,24 @@ function App() {
                             style={{ fontWeight: 'bold' }}
                           >
                             Sync Google Sheet Now
+                          </Button>
+                          <Button 
+                            danger
+                            icon={<LogoutOutlined />}
+                            onClick={() => {
+                              localStorage.removeItem('google_sheet_id');
+                              localStorage.removeItem('google_apps_script_url');
+                              localStorage.removeItem('alphatrader_passcode');
+                              localStorage.removeItem('alphatrader_autolock');
+                              setGoogleSheetId('');
+                              setGoogleAppsScriptUrl('');
+                              setAppPasscode('');
+                              setIsConnected(false);
+                              message.success('Logged out successfully from Google Sheet.');
+                            }}
+                            style={{ fontWeight: 'bold' }}
+                          >
+                            Log Out / Disconnect
                           </Button>
                           <span style={{ color: 'var(--text-secondary)', fontSize: '13px' }}>
                             Total synced trades: <Tag color="cyan">{googleSheetSyncCount}</Tag>
@@ -4265,17 +4290,33 @@ function App() {
             <Form.Item
               name="why"
               label="Strategy / Decision Reason"
-              rules={[{ required: true, message: 'Please input strategy reason' }]}
+              rules={[{ required: true, message: 'Please select a strategy' }]}
             >
-              <Select placeholder="Select or type custom strategy" showSearch optionFilterProp="children" mode="combobox">
+              <Select 
+                placeholder="Select strategy" 
+                onChange={(value) => {
+                  setIsCustomStrategy(value === 'Other');
+                }}
+              >
                 <Option value="CDC Action Zone">CDC Action Zone</Option>
                 <Option value="Breakout">Breakout</Option>
                 <Option value="EMA Cross">EMA Cross</Option>
                 <Option value="Support/Resistance Bounce">Support/Resistance Bounce</Option>
                 <Option value="Value Investment">Value Investment</Option>
                 <Option value="Rebalance">Rebalance</Option>
+                <Option value="Other">Other (Type custom strategy...)</Option>
               </Select>
             </Form.Item>
+
+            {isCustomStrategy && (
+              <Form.Item
+                name="customWhy"
+                label="Custom Strategy"
+                rules={[{ required: true, message: 'Please input your custom strategy' }]}
+              >
+                <Input placeholder="Enter your custom strategy (e.g. RSI > 70)" />
+              </Form.Item>
+            )}
 
             <Form.Item
               name="remark"
@@ -4603,29 +4644,30 @@ function App() {
           </Form>
         </Modal>
 
-        {/* MODAL 4: TRANSFER ACTIVE POSITION */}
+        {/* MODAL 4: TRANSFER TRADE */}
         <Modal
-          title={`Transfer ${transferTargetAsset} Active Position`}
+          title={`Transfer Trade (${editingTrade?.action.toUpperCase()} ${editingTrade?.quantity} ${editingTrade?.assetName}) to Portfolio`}
           open={isTransferModalOpen}
-          onCancel={() => setIsTransferModalOpen(false)}
+          onCancel={() => {
+            setIsTransferModalOpen(false);
+            setEditingTrade(null);
+            transferForm.resetFields();
+          }}
           footer={null}
         >
           <div style={{ marginBottom: '18px', padding: '10px 14px', background: 'rgba(255, 255, 255, 0.02)', borderRadius: '6px', border: '1px solid var(--border-color)' }}>
             <Text style={{ display: 'block', fontSize: '13px', color: 'var(--text-secondary)' }}>
-              Moving active position for <strong>{transferTargetAsset}</strong>.
+              Moving transaction of <strong>{editingTrade?.assetName}</strong>.
             </Text>
             <Text style={{ display: 'block', fontSize: '13px', color: 'var(--text-secondary)', marginTop: '4px' }}>
-              Current Portfolio Source: <strong style={{ color: 'var(--primary-color)' }}>{transferSourcePortfolio}</strong>
-            </Text>
-            <Text style={{ display: 'block', fontSize: '11px', color: 'var(--text-muted)', marginTop: '8px' }}>
-              * This will migrate all historical BUY/SELL trades of {transferTargetAsset} in this portfolio to the destination portfolio.
+              Current Portfolio: <strong style={{ color: 'var(--primary-color)' }}>{editingTrade?.portfolio}</strong>
             </Text>
           </div>
 
           <Form
             form={transferForm}
             layout="vertical"
-            onFinish={handleTransferPosition}
+            onFinish={handleTransferTrade}
           >
             <Form.Item
               name="targetPortfolio"
@@ -4633,7 +4675,7 @@ function App() {
               rules={[{ required: true, message: 'Please select a destination portfolio' }]}
             >
               <Select placeholder="Choose target portfolio...">
-                {portfolios.filter(p => p !== transferSourcePortfolio).map(p => (
+                {portfolios.filter(p => p !== editingTrade?.portfolio).map(p => (
                   <Option key={p} value={p}>{p}</Option>
                 ))}
               </Select>
@@ -4641,7 +4683,11 @@ function App() {
 
             <Form.Item style={{ marginBottom: 0, textAlign: 'right' }}>
               <Space>
-                <Button onClick={() => setIsTransferModalOpen(false)}>Cancel</Button>
+                <Button onClick={() => {
+                  setIsTransferModalOpen(false);
+                  setEditingTrade(null);
+                  transferForm.resetFields();
+                }}>Cancel</Button>
                 <Button type="primary" htmlType="submit" style={{ color: '#06080f', fontWeight: 'bold' }}>
                   Confirm Transfer
                 </Button>
