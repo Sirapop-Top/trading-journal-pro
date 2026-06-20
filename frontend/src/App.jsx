@@ -1059,7 +1059,7 @@ function App() {
     }
     
     let resolvedSymbol = symbol.trim().toUpperCase();
-    if (assetType === 'Crypto' && !resolvedSymbol.includes('-')) {
+    if (assetType && assetType.trim().toLowerCase() === 'crypto' && !resolvedSymbol.includes('-')) {
       resolvedSymbol = `${resolvedSymbol}-USD`;
       tradeForm.setFieldsValue({ assetName: resolvedSymbol });
     }
@@ -1120,7 +1120,7 @@ function App() {
   const handleAddTrade = async (values) => {
     let resolvedSymbol = values.assetName.trim().toUpperCase();
     const assetType = values.assetType;
-    if (assetType === 'Crypto' && !resolvedSymbol.includes('-')) {
+    if (assetType && assetType.trim().toLowerCase() === 'crypto' && !resolvedSymbol.includes('-')) {
       resolvedSymbol = `${resolvedSymbol}-USD`;
       tradeForm.setFieldsValue({ assetName: resolvedSymbol });
     }

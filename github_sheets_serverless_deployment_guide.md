@@ -232,6 +232,8 @@ function getDashboardData() {
     
     if (uniqueAssets.indexOf(assetName) === -1) {
       uniqueAssets.push(assetName);
+      assetTypesMap = assetTypesMap || {};
+      assetTypesMap[assetName] = assetType;
     }
     
     if (portfolio && portfolios.indexOf(portfolio) === -1) {
@@ -250,8 +252,9 @@ function getDashboardData() {
   
   for (var j = 0; j < uniqueAssets.length; j++) {
     var asset = uniqueAssets[j];
+    var type = (assetTypesMap && assetTypesMap[asset]) || "";
     try {
-      var price = fetchPriceFromYahoo(asset);
+      var price = fetchPriceFromYahoo(asset, type);
       if (price) livePrices[asset] = price;
     } catch(err) {}
   }
@@ -276,7 +279,7 @@ function fetchRateFromYahoo(symbol) {
   }
 }
 
-function fetchPriceFromYahoo(asset) {
+function fetchPriceFromYahoo(asset, assetType) {
   var symbol = asset;
   var upperAsset = asset.toUpperCase().trim();
   var tickerMap = {
@@ -290,14 +293,11 @@ function fetchPriceFromYahoo(asset) {
   if (tickerMap[upperAsset]) {
     symbol = tickerMap[upperAsset];
   } else {
-    // If it's a known crypto asset, append -USD
-    if (upperAsset === "BTC" || upperAsset === "ETH" || upperAsset === "SOL" || upperAsset === "BNB" || upperAsset === "XRP" || upperAsset === "ADA" || upperAsset === "DOGE" || upperAsset === "DOT") {
-      var price = fetchRateFromYahoo(upperAsset + "-USD");
-      if (price) return price;
-    }
-    if (upperAsset.length <= 5) {
-      var price = fetchRateFromYahoo(upperAsset + ".BK");
-      if (price) return price;
+    var typeLower = (assetType || "").toLowerCase().trim();
+    if (typeLower === "crypto" && upperAsset.indexOf("-") === -1) {
+      symbol = upperAsset + "-USD";
+    } else if (typeLower === "thai stock" && !upperAsset.endsWith(".BK")) {
+      symbol = upperAsset + ".BK";
     }
   }
   
