@@ -270,86 +270,6 @@ function App() {
     };
   }, [appPasscode, autoLockMinutes, isLocked]);
 
-  // Advanced Trading Analytics
-  const tradingAnalytics = useMemo(() => {
-    const totalTrades = filteredTrades.length;
-    const buysCount = filteredTrades.filter(t => t.action.toLowerCase() === 'buy').length;
-    const sellsCount = filteredTrades.filter(t => t.action.toLowerCase() === 'sell').length;
-
-    const sortedTrades = [...filteredTrades].sort((a, b) => dayjs(a.date).unix() - dayjs(b.date).unix());
-    const assetState = {};
-    let winCount = 0;
-    let lossCount = 0;
-    let grossProfit = 0;
-    let grossLoss = 0;
-    let maxWinVal = 0;
-    let maxLossVal = 0;
-
-    sortedTrades.forEach(trade => {
-      const name = trade.assetName;
-      const qty = Number(trade.quantity) || 0;
-      const price = Number(trade.priceUnit) || 0;
-      const action = trade.action.toLowerCase();
-
-      if (!assetState[name]) {
-        assetState[name] = { qty: 0, totalCost: 0 };
-      }
-      const state = assetState[name];
-
-      const rateToTHB = liveRates[trade.currency] || 1.0;
-      const displayRateToTHB = liveRates[displayCurrency] || 1.0;
-
-      if (action === 'buy') {
-        state.qty += qty;
-        state.totalCost += qty * price;
-      } else if (action === 'sell') {
-        const wac = state.qty > 0 ? (state.totalCost / state.qty) : 0;
-        const realizedPnL = (price - wac) * qty;
-        const realizedPnLConverted = (realizedPnL * rateToTHB) / displayRateToTHB;
-
-        if (realizedPnLConverted > 0.01) {
-          winCount++;
-          grossProfit += realizedPnLConverted;
-          if (realizedPnLConverted > maxWinVal) {
-            maxWinVal = realizedPnLConverted;
-          }
-        } else if (realizedPnLConverted < -0.01) {
-          lossCount++;
-          grossLoss += Math.abs(realizedPnLConverted);
-          if (Math.abs(realizedPnLConverted) > maxLossVal) {
-            maxLossVal = Math.abs(realizedPnLConverted);
-          }
-        }
-
-        state.qty = Math.max(0, state.qty - qty);
-        state.totalCost = Math.max(0, state.totalCost - (qty * wac));
-      }
-    });
-
-    const totalClosedTrades = winCount + lossCount;
-    const winRate = totalClosedTrades > 0 ? (winCount / totalClosedTrades) * 100 : 0;
-    const profitFactor = grossLoss > 0 ? (grossProfit / grossLoss) : (grossProfit > 0 ? Infinity : 1.0);
-    const avgWin = winCount > 0 ? (grossProfit / winCount) : 0;
-    const avgLoss = lossCount > 0 ? (grossLoss / lossCount) : 0;
-    const riskRewardRatio = avgLoss > 0 ? (avgWin / avgLoss) : 0;
-
-    return {
-      totalTrades,
-      buysCount,
-      sellsCount,
-      winCount,
-      lossCount,
-      totalClosedTrades,
-      winRate,
-      profitFactor,
-      avgWin,
-      avgLoss,
-      riskRewardRatio,
-      maxWinVal,
-      maxLossVal
-    };
-  }, [filteredTrades, liveRates, displayCurrency]);
-
   // Load data on startup
   useEffect(() => {
     fetchData();
@@ -740,6 +660,86 @@ function App() {
     }
     return trades.filter(t => t.portfolio === activePortfolio);
   }, [trades, activePortfolio]);
+
+  // Advanced Trading Analytics
+  const tradingAnalytics = useMemo(() => {
+    const totalTrades = filteredTrades.length;
+    const buysCount = filteredTrades.filter(t => t.action.toLowerCase() === 'buy').length;
+    const sellsCount = filteredTrades.filter(t => t.action.toLowerCase() === 'sell').length;
+
+    const sortedTrades = [...filteredTrades].sort((a, b) => dayjs(a.date).unix() - dayjs(b.date).unix());
+    const assetState = {};
+    let winCount = 0;
+    let lossCount = 0;
+    let grossProfit = 0;
+    let grossLoss = 0;
+    let maxWinVal = 0;
+    let maxLossVal = 0;
+
+    sortedTrades.forEach(trade => {
+      const name = trade.assetName;
+      const qty = Number(trade.quantity) || 0;
+      const price = Number(trade.priceUnit) || 0;
+      const action = trade.action.toLowerCase();
+
+      if (!assetState[name]) {
+        assetState[name] = { qty: 0, totalCost: 0 };
+      }
+      const state = assetState[name];
+
+      const rateToTHB = liveRates[trade.currency] || 1.0;
+      const displayRateToTHB = liveRates[displayCurrency] || 1.0;
+
+      if (action === 'buy') {
+        state.qty += qty;
+        state.totalCost += qty * price;
+      } else if (action === 'sell') {
+        const wac = state.qty > 0 ? (state.totalCost / state.qty) : 0;
+        const realizedPnL = (price - wac) * qty;
+        const realizedPnLConverted = (realizedPnL * rateToTHB) / displayRateToTHB;
+
+        if (realizedPnLConverted > 0.01) {
+          winCount++;
+          grossProfit += realizedPnLConverted;
+          if (realizedPnLConverted > maxWinVal) {
+            maxWinVal = realizedPnLConverted;
+          }
+        } else if (realizedPnLConverted < -0.01) {
+          lossCount++;
+          grossLoss += Math.abs(realizedPnLConverted);
+          if (Math.abs(realizedPnLConverted) > maxLossVal) {
+            maxLossVal = Math.abs(realizedPnLConverted);
+          }
+        }
+
+        state.qty = Math.max(0, state.qty - qty);
+        state.totalCost = Math.max(0, state.totalCost - (qty * wac));
+      }
+    });
+
+    const totalClosedTrades = winCount + lossCount;
+    const winRate = totalClosedTrades > 0 ? (winCount / totalClosedTrades) * 100 : 0;
+    const profitFactor = grossLoss > 0 ? (grossProfit / grossLoss) : (grossProfit > 0 ? Infinity : 1.0);
+    const avgWin = winCount > 0 ? (grossProfit / winCount) : 0;
+    const avgLoss = lossCount > 0 ? (grossLoss / lossCount) : 0;
+    const riskRewardRatio = avgLoss > 0 ? (avgWin / avgLoss) : 0;
+
+    return {
+      totalTrades,
+      buysCount,
+      sellsCount,
+      winCount,
+      lossCount,
+      totalClosedTrades,
+      winRate,
+      profitFactor,
+      avgWin,
+      avgLoss,
+      riskRewardRatio,
+      maxWinVal,
+      maxLossVal
+    };
+  }, [filteredTrades, liveRates, displayCurrency]);
 
   // Search and filtered trades specifically for the Journal Table display
   const journalFilteredTrades = useMemo(() => {
