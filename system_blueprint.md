@@ -496,3 +496,21 @@ In `frontend/src/App.jsx`, the `tradingAnalytics` useMemo hook was declared at l
 - `system_blueprint.md`
 
 **Commit:** `92a5879` — `Fix: crypto ticker validation and responsive mobile layout updates`
+
+---
+
+### [2026-06-20] — Documentation: Crypto Ticker Mapping Instructions Added to SSOT List & Operation Guide
+
+**Request:**
+Add guidelines describing how to key in crypto asset names (symbols like BTC, ETH) for ticker verification in the Single Source of Truth (SSOT) data settings.
+
+**Fixes & Enhancements Applied:**
+1. **Frontend Settings Panel:** Added a new description bullet point under the "Single Source of Truth (SSOT) Ticker Mappings" card in the Settings tab (`App.jsx`) instructing the user to key in standard crypto symbols directly (e.g. `BTC`, `ETH`), and highlighting that the system handles mapping suffix suffixes (`-USD`) automatically.
+2. **User Manual:** Updated the "Log New Trade" section of `USER_MANUAL.md` to describe the ticker input format rules for Thai Stocks (`.BK`), Global Stocks (direct), and Crypto Assets (`-USD` mapped automatically).
+
+**Files Changed:**
+- `frontend/src/App.jsx`
+- `USER_MANUAL.md`
+- `system_blueprint.md`
+
+**Commit:** `b663b77` — `docs: add crypto ticker mapping guide to user manual and settings panel`
