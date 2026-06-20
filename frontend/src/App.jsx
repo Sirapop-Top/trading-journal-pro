@@ -4290,6 +4290,7 @@ function App() {
                           <ul>
                             <li>Thai Stocks: Ticker mapped dynamically to <code>[ASSET_NAME].BK</code>. Fallback rules applied (e.g. BJC &rarr; <code>BJC.BK</code>).</li>
                             <li>Global Stocks: Directly calls symbol ticker (e.g. MSTR &rarr; <code>MSTR</code>).</li>
+                            <li>Crypto Assets: Key in standard symbols (e.g. <code>BTC</code>, <code>ETH</code>, <code>SOL</code>). App automatically appends <code>-USD</code> (e.g. <code>BTC-USD</code>) for Yahoo Finance verification.</li>
                             <li>USD to THB Rate: Fetched from Yahoo Forex ticker <code>USDTHB=X</code> (currently: {liveRates.USD.toFixed(4)}).</li>
                             <li>EUR to THB Rate: Fetched from Yahoo Forex ticker <code>EURTHB=X</code> (currently: {liveRates.EUR.toFixed(4)}).</li>
                           </ul>

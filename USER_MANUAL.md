@@ -82,7 +82,10 @@ You can access your journal 24/7 without keeping your PC running. To configure C
 To keep calculations accurate, AlphaTrader validates symbols against Yahoo Finance before writing to the database:
 1. Click **Log Trade** in the top-right menu of the terminal.
 2. Select your portfolio, action type, date, quantity, and currency.
-3. Enter the ticker symbol (e.g. `MSTR`, `KCE`, `BTC`).
+3. Enter the ticker symbol:
+   * **Thai Stocks:** Key in standard symbols (e.g. `BJC`, `KCE`). The system automatically appends `.BK` under the hood.
+   * **Global Stocks:** Key in directly (e.g. `MSTR`, `TSLA`).
+   * **Crypto Assets:** Key in standard tokens (e.g. `BTC`, `ETH`, `SOL`). The system automatically appends `-USD` (e.g. `BTC-USD`) under the hood to query live rates from Yahoo Finance.
 4. Click **Verify** next to the Asset Name field:
    * **Green Check:** Verified on Yahoo Finance! Live market prices will load dynamically.
    * **Red Cross:** Invalid ticker. Checks will run again if you attempt to submit.
