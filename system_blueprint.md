@@ -385,4 +385,40 @@ Storing custom portfolio mappings and custom portfolio lists client-side in brow
 
 **Commit:** `0720d43` — `Fix: save portfolio mappings and custom portfolios to google sheets Portfolios tab`
 
+---
+
+### [2026-06-20] — Feature: Real-Time Ticker Verification, Strategy Editing, Secure Passcode Lock & Trader Performance Analytics
+
+**Request / Issues Addressed:**
+1. Invalid tickers could bypass verification and get written to the database (especially in Cloud Mode).
+2. Users wanted a secure lock-out passcode to protect private trade history.
+3. Users requested a feature to edit trade strategies after logging.
+4. Users requested a detailed operational manual and improved performance insights.
+
+**Fixes & Enhancements Applied:**
+1. **Universal Ticker Verification:**
+   - Proxied verification through Google Apps Script in Cloud Mode (`validateTicker` action).
+   - Enforced validation inside the trade submission flow for both Local and Cloud modes.
+   - Added a confirmation modal fallback if Yahoo Finance is unreachable (e.g., offline usage) to allow intentional bypass.
+2. **Passcode Protection & Cooldown Lockout:**
+   - Built a custom security panel in Settings to toggle passcode locks and select auto-lock on idle (1-30 minutes).
+   - Designed a glassmorphic secure lock overlay preventing access to DOM/components.
+   - Added a security cooldown that locks out keyboard entries for 60 seconds after 5 incorrect password attempts.
+3. **Editable Trade Strategies:**
+   - Implemented an "Edit Strategy" pencil action in the trade history logs table.
+   - Added `PUT /api/trades/{trade_id}/strategy` endpoint in FastAPI and `updateTradeStrategy` in Apps Script to rewrite lines in Local Excel and Cloud Sheets.
+4. **Trader Analytics KPI Grid:**
+   - Computed win rate, profit factor, risk-to-reward ratio, average win/loss ratio, and maximum win/loss values and embedded them on both desktop and mobile dashboards.
+5. **Comprehensive Operation Manual:**
+   - Created `USER_MANUAL.md` mapping setup, cloud deployment steps, and core features.
+
+**Files Changed:**
+- `backend/main.py`
+- `frontend/src/App.jsx`
+- `github_sheets_serverless_deployment_guide.md`
+- `system_blueprint.md`
+- `USER_MANUAL.md` (new file)
+
+**Commit:** `7071e62` — `Feature: added validation proxy, passcode lock screen, trade strategy editor, trader analytics card, and user manual`
+
 

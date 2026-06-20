@@ -50,6 +50,12 @@ class PositionTransfer(BaseModel):
 class GoogleSheetSettings(BaseModel):
     google_sheet_id: str
     google_apps_script_url: Optional[str] = ""
+    app_passcode: Optional[str] = ""
+
+class TradeStrategyUpdate(BaseModel):
+    why: str
+    remark: Optional[str] = ""
+
 
 
 # In-memory cache for Yahoo Finance prices to prevent hitting limits and provide fast responses
@@ -485,6 +491,51 @@ def delete_trade(trade_id: str):
     
     return {"message": "Trade deleted successfully"}
 
+@app.put("/api/trades/{trade_id}/strategy")
+def update_trade_strategy(trade_id: str, update_data: TradeStrategyUpdate):
+    db_data = load_db()
+    trades = db_data.get("trades", [])
+    
+    found_trade = None
+    for t in trades:
+        if t["id"] == trade_id:
+            t["why"] = update_data.why
+            t["remark"] = update_data.remark if update_data.remark is not None else t.get("remark", "")
+            found_trade = t
+            break
+            
+    if not found_trade:
+        raise HTTPException(status_code=404, detail="Trade not found")
+        
+    db_data["trades"] = trades
+    save_db(db_data)
+    
+    # Rewrite Excel sheet to keep it in sync
+    rewrite_excel_from_db(trades)
+    
+    # Write to Google Sheets Apps Script if configured (so cloud is updated too!)
+    apps_script_url = db_data.get("google_apps_script_url")
+    if apps_script_url:
+        try:
+            import requests
+            print(f"[Google Apps Script Update] Updating trade strategy on Google Sheet...")
+            payload = {
+                "action": "updateTradeStrategy",
+                "tradeId": trade_id,
+                "why": update_data.why,
+                "remark": update_data.remark
+            }
+            resp = requests.post(apps_script_url, json=payload, timeout=10)
+            if resp.status_code == 200:
+                print("[Google Apps Script Update] Trade strategy updated on Google Sheet successfully.")
+                sync_google_sheet()
+            else:
+                print(f"[Google Apps Script Update] Failed with status code: {resp.status_code}")
+        except Exception as e:
+            print(f"[Google Apps Script Update] Error updating trade strategy: {e}")
+            
+    return found_trade
+
 @app.post("/api/portfolios")
 def add_portfolio(portfolio: PortfolioCreate):
     db_data = load_db()
@@ -916,6 +967,7 @@ def get_google_sheet_settings():
     return {
         "google_sheet_id": db_data.get("google_sheet_id", ""),
         "google_apps_script_url": db_data.get("google_apps_script_url", ""),
+        "app_passcode": db_data.get("app_passcode", ""),
         "synced_count": len(db_data.get("trades", []))
     }
 
@@ -925,6 +977,7 @@ def save_google_sheet_settings(settings: GoogleSheetSettings):
     old_id = db_data.get("google_sheet_id", "")
     new_id = settings.google_sheet_id.strip()
     new_script_url = settings.google_apps_script_url.strip() if settings.google_apps_script_url else ""
+    app_passcode = settings.app_passcode.strip() if settings.app_passcode else ""
     
     # Auto-extract Google Sheet ID if the user pasted the entire URL
     if "docs.google.com/spreadsheets" in new_id:
@@ -935,6 +988,7 @@ def save_google_sheet_settings(settings: GoogleSheetSettings):
             print(f"[Google Sheet Settings] Warning: Could not parse Sheet ID from URL: {parse_err}")
             
     db_data["google_apps_script_url"] = new_script_url
+    db_data["app_passcode"] = app_passcode
     
     if old_id != new_id:
         db_data["google_sheet_id"] = new_id
@@ -952,6 +1006,7 @@ def save_google_sheet_settings(settings: GoogleSheetSettings):
         "success": True,
         "google_sheet_id": new_id,
         "google_apps_script_url": new_script_url,
+        "app_passcode": app_passcode,
         "sync_success": sync_success
     }
 

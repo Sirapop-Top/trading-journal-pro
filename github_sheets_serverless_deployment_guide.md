@@ -123,6 +123,12 @@ function doPost(e) {
   } else if (action === "transferPosition") {
     return ContentService.createTextOutput(JSON.stringify(transferPosition(contents.assetName, contents.targetPortfolio)))
       .setMimeType(ContentService.MimeType.JSON);
+  } else if (action === "validateTicker") {
+    return ContentService.createTextOutput(JSON.stringify(validateTicker(contents.symbol, contents.assetType)))
+      .setMimeType(ContentService.MimeType.JSON);
+  } else if (action === "updateTradeStrategy") {
+    return ContentService.createTextOutput(JSON.stringify(updateTradeStrategy(contents.tradeId, contents.why, contents.remark)))
+      .setMimeType(ContentService.MimeType.JSON);
   }
   
   // Fallback for legacy direct form uploads
@@ -535,5 +541,75 @@ function transferPosition(assetName, targetPortfolio) {
   addPortfolio(targetPortfolio);
   
   return { success: true };
+}
+
+function validateTicker(symbol, assetType) {
+  var symbolStripped = symbol.toUpperCase().trim();
+  if (!symbolStripped) {
+    return { valid: false, message: "Ticker symbol cannot be empty." };
+  }
+  
+  // Resolve ticker symbol
+  var resolvedSymbol = symbolStripped;
+  var tickerMap = {
+    "BJC": "BJC.BK",
+    "KCE": "KCE.BK",
+    "JMART": "JMART.BK",
+    "ROJNA": "ROJNA.BK",
+    "MSTR": "MSTR"
+  };
+  
+  if (tickerMap[resolvedSymbol]) {
+    resolvedSymbol = tickerMap[resolvedSymbol];
+  } else {
+    if (assetType.toLowerCase() === "thai stock" && !resolvedSymbol.endsWith(".BK")) {
+      resolvedSymbol = resolvedSymbol + ".BK";
+    }
+  }
+  
+  try {
+    var price = fetchRateFromYahoo(resolvedSymbol);
+    if (price !== null && price !== undefined && !isNaN(price)) {
+      return {
+        valid: true,
+        ticker: resolvedSymbol,
+        message: "Ticker '" + resolvedSymbol + "' is verified on Yahoo Finance. Live Price: " + price
+      };
+    } else {
+      return {
+        valid: false,
+        message: "Ticker '" + resolvedSymbol + "' not found or has no price data on Yahoo Finance."
+      };
+    }
+  } catch (e) {
+    return {
+      valid: false,
+      message: "Error verifying ticker '" + resolvedSymbol + "': " + e.toString()
+    };
+  }
+}
+
+function updateTradeStrategy(tradeId, why, remark) {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Journal");
+  var rowIdx = parseInt(tradeId);
+  var lastRow = sheet.getLastRow();
+  
+  if (rowIdx > 1 && rowIdx <= lastRow) {
+    var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+    var headersLower = headers.map(function(h) { return h.toString().toLowerCase().trim(); });
+    
+    var whyIdx = findIdxInArray(headersLower, ["why", "decision", "reason"]);
+    var remarkIdx = findIdxInArray(headersLower, ["remark", "note"]);
+    
+    if (whyIdx !== -1) {
+      sheet.getRange(rowIdx, whyIdx + 1).setValue(why);
+    }
+    if (remarkIdx !== -1) {
+      sheet.getRange(rowIdx, remarkIdx + 1).setValue(remark || "");
+    }
+    return { success: true };
+  }
+  
+  return { success: false, error: "Row index out of range: " + rowIdx + " (lastRow=" + lastRow + ")" };
 }
 ```

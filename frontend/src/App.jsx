@@ -25,7 +25,9 @@ import {
   MenuUnfoldOutlined,
   InfoCircleOutlined,
   EyeOutlined,
-  EyeInvisibleOutlined
+  EyeInvisibleOutlined,
+  LockOutlined,
+  EditOutlined
 } from '@ant-design/icons';
 import { 
   AreaChart, Area, PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend,
@@ -215,6 +217,138 @@ function App() {
     message: '',
     checkedTicker: ''
   });
+
+  // Passcode Security States
+  const [appPasscode, setAppPasscode] = useState(() => localStorage.getItem('alphatrader_passcode') || '');
+  const [isLocked, setIsLocked] = useState(() => !!localStorage.getItem('alphatrader_passcode'));
+  const [failedAttempts, setFailedAttempts] = useState(0);
+  const [lockoutTimeRemaining, setLockoutTimeRemaining] = useState(0);
+  const [enteredPasscode, setEnteredPasscode] = useState('');
+  const [autoLockMinutes, setAutoLockMinutes] = useState(() => Number(localStorage.getItem('alphatrader_autolock') || '0')); // 0 = disabled
+
+  // Edit Strategy States
+  const [isEditStrategyModalOpen, setIsEditStrategyModalOpen] = useState(false);
+  const [editingTrade, setEditingTrade] = useState(null);
+  const [editStrategyForm] = Form.useForm();
+
+  // Lockout Timer Cooldown
+  useEffect(() => {
+    if (lockoutTimeRemaining <= 0) return;
+    const timer = setInterval(() => {
+      setLockoutTimeRemaining(prev => {
+        if (prev <= 1) {
+          clearInterval(timer);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [lockoutTimeRemaining]);
+
+  // Idle Timer Auto-Lock
+  useEffect(() => {
+    if (!appPasscode || autoLockMinutes <= 0 || isLocked) return;
+
+    let timeoutId;
+    const resetTimer = () => {
+      if (timeoutId) clearTimeout(timeoutId);
+      timeoutId = setTimeout(() => {
+        setIsLocked(true);
+        message.warning('App locked automatically due to inactivity.');
+      }, autoLockMinutes * 60 * 1000);
+    };
+
+    const events = ['mousemove', 'keydown', 'mousedown', 'touchstart', 'click'];
+    events.forEach(event => window.addEventListener(event, resetTimer));
+
+    resetTimer();
+
+    return () => {
+      if (timeoutId) clearTimeout(timeoutId);
+      events.forEach(event => window.removeEventListener(event, resetTimer));
+    };
+  }, [appPasscode, autoLockMinutes, isLocked]);
+
+  // Advanced Trading Analytics
+  const tradingAnalytics = useMemo(() => {
+    const totalTrades = filteredTrades.length;
+    const buysCount = filteredTrades.filter(t => t.action.toLowerCase() === 'buy').length;
+    const sellsCount = filteredTrades.filter(t => t.action.toLowerCase() === 'sell').length;
+
+    const sortedTrades = [...filteredTrades].sort((a, b) => dayjs(a.date).unix() - dayjs(b.date).unix());
+    const assetState = {};
+    let winCount = 0;
+    let lossCount = 0;
+    let grossProfit = 0;
+    let grossLoss = 0;
+    let maxWinVal = 0;
+    let maxLossVal = 0;
+
+    sortedTrades.forEach(trade => {
+      const name = trade.assetName;
+      const qty = Number(trade.quantity) || 0;
+      const price = Number(trade.priceUnit) || 0;
+      const action = trade.action.toLowerCase();
+
+      if (!assetState[name]) {
+        assetState[name] = { qty: 0, totalCost: 0 };
+      }
+      const state = assetState[name];
+
+      const rateToTHB = liveRates[trade.currency] || 1.0;
+      const displayRateToTHB = liveRates[displayCurrency] || 1.0;
+
+      if (action === 'buy') {
+        state.qty += qty;
+        state.totalCost += qty * price;
+      } else if (action === 'sell') {
+        const wac = state.qty > 0 ? (state.totalCost / state.qty) : 0;
+        const realizedPnL = (price - wac) * qty;
+        const realizedPnLConverted = (realizedPnL * rateToTHB) / displayRateToTHB;
+
+        if (realizedPnLConverted > 0.01) {
+          winCount++;
+          grossProfit += realizedPnLConverted;
+          if (realizedPnLConverted > maxWinVal) {
+            maxWinVal = realizedPnLConverted;
+          }
+        } else if (realizedPnLConverted < -0.01) {
+          lossCount++;
+          grossLoss += Math.abs(realizedPnLConverted);
+          if (Math.abs(realizedPnLConverted) > maxLossVal) {
+            maxLossVal = Math.abs(realizedPnLConverted);
+          }
+        }
+
+        state.qty = Math.max(0, state.qty - qty);
+        state.totalCost = Math.max(0, state.totalCost - (qty * wac));
+      }
+    });
+
+    const totalClosedTrades = winCount + lossCount;
+    const winRate = totalClosedTrades > 0 ? (winCount / totalClosedTrades) * 100 : 0;
+    const profitFactor = grossLoss > 0 ? (grossProfit / grossLoss) : (grossProfit > 0 ? Infinity : 1.0);
+    const avgWin = winCount > 0 ? (grossProfit / winCount) : 0;
+    const avgLoss = lossCount > 0 ? (grossLoss / lossCount) : 0;
+    const riskRewardRatio = avgLoss > 0 ? (avgWin / avgLoss) : 0;
+
+    return {
+      totalTrades,
+      buysCount,
+      sellsCount,
+      winCount,
+      lossCount,
+      totalClosedTrades,
+      winRate,
+      profitFactor,
+      avgWin,
+      avgLoss,
+      riskRewardRatio,
+      maxWinVal,
+      maxLossVal
+    };
+  }, [filteredTrades, liveRates, displayCurrency]);
 
   // Load data on startup
   useEffect(() => {
@@ -505,9 +639,17 @@ function App() {
           setGoogleAppsScriptUrl(localUrl);
           axios.post(`${API_BASE}/api/google-sheet-settings`, {
             google_sheet_id: response.data.google_sheet_id || '',
-            google_apps_script_url: localUrl
+            google_apps_script_url: localUrl,
+            app_passcode: response.data.app_passcode || ''
           }).catch(err => console.error("Auto-syncing script URL to backend failed:", err));
         }
+      }
+      if (response.data.app_passcode) {
+        setAppPasscode(response.data.app_passcode);
+        localStorage.setItem('alphatrader_passcode', response.data.app_passcode);
+      } else {
+        setAppPasscode('');
+        localStorage.removeItem('alphatrader_passcode');
       }
       setGoogleSheetSyncCount(response.data.synced_count || 0);
     } catch (error) {
@@ -537,7 +679,8 @@ function App() {
     try {
       const response = await axios.post(`${API_BASE}/api/google-sheet-settings`, {
         google_sheet_id: googleSheetId,
-        google_apps_script_url: googleAppsScriptUrl
+        google_apps_script_url: googleAppsScriptUrl,
+        app_passcode: appPasscode
       });
       if (response.data.success) {
         message.success('Google Sheet sync settings saved successfully.');
@@ -916,29 +1059,47 @@ function App() {
     });
     
     try {
-      const response = await axios.get(`${API_BASE}/api/validate-ticker`, {
-        params: { symbol, asset_type: assetType }
-      });
+      const api = getApiUrl('/api/trades');
+      let response;
+      if (api.type === 'cloud') {
+        if (!api.url) {
+          throw new Error('Apps Script URL is missing. Set it in settings to validate tickers.');
+        }
+        const result = await callGoogleAppsScript(api.url, {
+          action: 'validateTicker',
+          symbol: symbol,
+          assetType: assetType
+        });
+        response = { data: result };
+      } else {
+        response = await axios.get(`${API_BASE}/api/validate-ticker`, {
+          params: { symbol, asset_type: assetType }
+        });
+      }
+
       if (response.data.valid) {
         setTickerValidation({
           status: 'success',
           message: response.data.message,
           checkedTicker: tickerUpper
         });
+        message.success(`Ticker verified on Yahoo Finance!`);
       } else {
         setTickerValidation({
           status: 'error',
           message: response.data.message,
           checkedTicker: tickerUpper
         });
+        message.error(`Verification Failed: ${response.data.message}`);
       }
     } catch (error) {
       console.error('Ticker validation connection failed:', error);
       setTickerValidation({
-        status: 'success',
-        message: 'Yahoo Finance unreachable. Verified locally as fallback.',
+        status: 'error',
+        message: `Connection failed: ${error.message || 'Cannot reach validation service.'}`,
         checkedTicker: tickerUpper
       });
+      message.error(`Could not connect to verification service.`);
     }
   };
 
@@ -947,14 +1108,27 @@ function App() {
     const symbol = values.assetName.trim().toUpperCase();
     const api = getApiUrl('/api/trades');
     
-    // Validate ticker before adding trade (skip on cloud mode to avoid CORS errors with Yahoo API direct queries)
-    if (api.type !== 'cloud' && (tickerValidation.status !== 'success' || tickerValidation.checkedTicker !== symbol)) {
+    // Validate ticker before adding trade
+    if (tickerValidation.status !== 'success' || tickerValidation.checkedTicker !== symbol) {
       setIsSyncing(true);
       const hideMsg = message.loading('Validating ticker on Yahoo Finance...', 0);
       try {
-        const response = await axios.get(`${API_BASE}/api/validate-ticker`, {
-          params: { symbol: values.assetName, asset_type: values.assetType }
-        });
+        let response;
+        if (api.type === 'cloud') {
+          if (!api.url) {
+            throw new Error('Apps Script URL is missing. Cannot validate ticker.');
+          }
+          const result = await callGoogleAppsScript(api.url, {
+            action: 'validateTicker',
+            symbol: values.assetName,
+            assetType: values.assetType
+          });
+          response = { data: result };
+        } else {
+          response = await axios.get(`${API_BASE}/api/validate-ticker`, {
+            params: { symbol: values.assetName, asset_type: values.assetType }
+          });
+        }
         hideMsg();
         setIsSyncing(false);
         
@@ -977,10 +1151,31 @@ function App() {
         hideMsg();
         setIsSyncing(false);
         console.error('Ticker validation failed during submit:', error);
-        setTickerValidation({
-          status: 'success',
-          message: 'Yahoo Finance verification offline. Bypassed.',
-          checkedTicker: symbol
+        
+        // Return a promise that resolves on dialog confirmation or cancel
+        return new Promise((resolve) => {
+          Modal.confirm({
+            title: 'Ticker Verification Unreachable',
+            content: `Could not verify '${symbol}' because: ${error.message || error}. Do you want to log this trade anyway without verification?`,
+            okText: 'Log Anyway',
+            cancelText: 'Cancel',
+            onOk: () => {
+              setTickerValidation({
+                status: 'success',
+                message: 'Validation bypassed by user.',
+                checkedTicker: symbol
+              });
+              handleAddTrade(values).then(resolve);
+            },
+            onCancel: () => {
+              setTickerValidation({
+                status: 'error',
+                message: 'Verification unreachable. Aborted.',
+                checkedTicker: symbol
+              });
+              resolve();
+            }
+          });
         });
       }
     }
@@ -1072,6 +1267,50 @@ function App() {
     } catch (error) {
       console.error('Error deleting trade:', error);
       message.error('Failed to delete trade.');
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  const handleUpdateStrategy = async (values) => {
+    if (!editingTrade) return;
+    setIsSyncing(true);
+    try {
+      const api = getApiUrl(`/api/trades/${editingTrade.id}/strategy`);
+      
+      const updatedData = {
+        why: values.why,
+        remark: values.remark || ''
+      };
+      
+      if (api.type === 'cloud') {
+        if (!api.url) {
+          throw new Error('Apps Script URL is missing in Cloud Mode.');
+        }
+        await callGoogleAppsScript(api.url, {
+          action: "updateTradeStrategy",
+          tradeId: editingTrade.id,
+          why: updatedData.why,
+          remark: updatedData.remark
+        });
+        message.success(`Trade strategy updated successfully on Google Sheets.`);
+        setTrades(prev => prev.map(t => t.id === editingTrade.id ? { ...t, ...updatedData } : t));
+        setIsEditStrategyModalOpen(false);
+        setEditingTrade(null);
+        editStrategyForm.resetFields();
+        fetchData();
+      } else {
+        const response = await axios.put(api.url, updatedData);
+        message.success(`Trade strategy updated successfully.`);
+        setIsEditStrategyModalOpen(false);
+        setEditingTrade(null);
+        editStrategyForm.resetFields();
+        setTrades(prev => prev.map(t => t.id === response.data.id ? response.data : t));
+        syncMarketData(true);
+      }
+    } catch (error) {
+      console.error('Error updating trade strategy:', error);
+      message.error(error.response?.data?.detail || 'Failed to update trade strategy.');
     } finally {
       setIsSyncing(false);
     }
@@ -1513,21 +1752,36 @@ function App() {
       }
     },
     {
-      title: '',
-      key: 'delete',
+      title: 'Actions',
+      key: 'actions',
       align: 'center',
-      width: 60,
+      width: 100,
       render: (_, record) => (
-        <Popconfirm
-          title="Delete Trade"
-          description="Are you sure you want to delete this trade from your journal? This will rewrite the spreadsheet."
-          onConfirm={() => handleDeleteTrade(record.id)}
-          okText="Delete"
-          cancelText="Cancel"
-          okButtonProps={{ danger: true }}
-        >
-          <Button type="text" danger icon={<DeleteOutlined />} size="small" />
-        </Popconfirm>
+        <Space size="middle">
+          <Button 
+            type="text" 
+            icon={<EditOutlined style={{ color: 'var(--primary-color)' }} />} 
+            size="small" 
+            onClick={() => {
+              setEditingTrade(record);
+              editStrategyForm.setFieldsValue({
+                why: record.why,
+                remark: record.remark
+              });
+              setIsEditStrategyModalOpen(true);
+            }}
+          />
+          <Popconfirm
+            title="Delete Trade"
+            description="Are you sure you want to delete this trade from your journal? This will rewrite the spreadsheet."
+            onConfirm={() => handleDeleteTrade(record.id)}
+            okText="Delete"
+            cancelText="Cancel"
+            okButtonProps={{ danger: true }}
+          >
+            <Button type="text" danger icon={<DeleteOutlined />} size="small" />
+          </Popconfirm>
+        </Space>
       )
     }
   ];
@@ -1805,6 +2059,184 @@ function App() {
     );
   }
 
+  if (isLocked) {
+    return (
+      <ConfigProvider
+        theme={{
+          algorithm: theme.darkAlgorithm,
+          token: {
+            colorPrimary: '#00f2fe',
+            colorSuccess: '#10b981',
+            colorError: '#f43f5e',
+            colorBgBase: '#06080f',
+            colorBgContainer: '#0b0e17',
+            colorBorder: '#1f293d',
+            fontFamily: "'Outfit', sans-serif"
+          }
+        }}
+      >
+        <div style={{
+          minHeight: '100vh',
+          background: 'radial-gradient(circle at center, #0b0e17 0%, #06080f 100%)',
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          padding: '20px',
+          position: 'relative',
+          overflow: 'hidden'
+        }}>
+          <div style={{
+            position: 'absolute',
+            width: '400px',
+            height: '400px',
+            borderRadius: '50%',
+            background: 'rgba(0, 242, 254, 0.04)',
+            filter: 'blur(80px)',
+            top: '10%',
+            left: '20%'
+          }}></div>
+          <div style={{
+            position: 'absolute',
+            width: '300px',
+            height: '300px',
+            borderRadius: '50%',
+            background: 'rgba(123, 92, 246, 0.04)',
+            filter: 'blur(80px)',
+            bottom: '10%',
+            right: '20%'
+          }}></div>
+
+          <Card
+            bordered={false}
+            style={{
+              width: '100%',
+              maxWidth: '400px',
+              background: 'rgba(11, 14, 23, 0.7)',
+              backdropFilter: 'blur(20px)',
+              border: '1px solid rgba(255, 255, 255, 0.06)',
+              boxShadow: '0 20px 50px rgba(0, 0, 0, 0.4)',
+              borderRadius: '16px',
+              textAlign: 'center',
+              padding: '24px 16px'
+            }}
+          >
+            <div style={{ marginBottom: '24px' }}>
+              <div style={{
+                display: 'inline-flex',
+                justifyContent: 'center',
+                alignItems: 'center',
+                width: '64px',
+                height: '64px',
+                borderRadius: '50%',
+                background: 'rgba(0, 242, 254, 0.1)',
+                border: '1px solid rgba(0, 242, 254, 0.2)',
+                boxShadow: '0 0 15px rgba(0, 242, 254, 0.1)',
+                color: 'var(--primary-color)',
+                fontSize: '28px',
+                marginBottom: '16px'
+              }}>
+                <LockOutlined />
+              </div>
+              <h2 style={{ color: '#ffffff', margin: '0 0 8px 0', fontFamily: 'var(--font-family-ui)', fontWeight: 800, letterSpacing: '0.5px' }}>
+                ALPHA<span style={{ color: 'var(--primary-color)' }}>TRADER</span> SECURED
+              </h2>
+              <p style={{ color: 'var(--text-secondary)', fontSize: '13px', margin: 0 }}>
+                This terminal is locked. Please enter your passcode to access.
+              </p>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              <Input.Password
+                placeholder="Enter passcode"
+                size="large"
+                value={enteredPasscode}
+                onChange={(e) => setEnteredPasscode(e.target.value)}
+                onPressEnter={() => {
+                  if (lockoutTimeRemaining > 0) return;
+                  if (enteredPasscode === appPasscode) {
+                    setIsLocked(false);
+                    setFailedAttempts(0);
+                    setEnteredPasscode('');
+                    message.success('Welcome back!');
+                  } else {
+                    const attempts = failedAttempts + 1;
+                    setFailedAttempts(attempts);
+                    setEnteredPasscode('');
+                    if (attempts >= 5) {
+                      setLockoutTimeRemaining(60);
+                      message.error('Too many failed attempts. Locked out for 60 seconds.');
+                    } else {
+                      message.error(`Incorrect passcode. ${5 - attempts} attempts remaining.`);
+                    }
+                  }
+                }}
+                disabled={lockoutTimeRemaining > 0}
+                style={{
+                  textAlign: 'center',
+                  letterSpacing: '4px',
+                  fontSize: '18px',
+                  background: 'rgba(6, 8, 15, 0.5)',
+                  border: '1px solid var(--border-color)',
+                  color: '#ffffff'
+                }}
+                autoFocus
+              />
+
+              <Button
+                type="primary"
+                size="large"
+                disabled={lockoutTimeRemaining > 0}
+                onClick={() => {
+                  if (enteredPasscode === appPasscode) {
+                    setIsLocked(false);
+                    setFailedAttempts(0);
+                    setEnteredPasscode('');
+                    message.success('Welcome back!');
+                  } else {
+                    const attempts = failedAttempts + 1;
+                    setFailedAttempts(attempts);
+                    setEnteredPasscode('');
+                    if (attempts >= 5) {
+                      setLockoutTimeRemaining(60);
+                      message.error('Too many failed attempts. Locked out for 60 seconds.');
+                    } else {
+                      message.error(`Incorrect passcode. ${5 - attempts} attempts remaining.`);
+                    }
+                  }
+                }}
+                style={{
+                  background: 'var(--accent-gradient)',
+                  border: 'none',
+                  color: '#06080f',
+                  fontWeight: 'bold',
+                  fontSize: '15px',
+                  height: '44px',
+                  borderRadius: '8px'
+                }}
+              >
+                Unlock Terminal
+              </Button>
+
+              {lockoutTimeRemaining > 0 && (
+                <div style={{
+                  color: 'var(--danger-color)',
+                  fontSize: '12px',
+                  fontWeight: 'bold',
+                  background: 'rgba(244, 63, 94, 0.08)',
+                  padding: '10px',
+                  borderRadius: '6px',
+                  border: '1px solid rgba(244, 63, 94, 0.2)'
+                }}>
+                  Too many incorrect attempts. Locked out for {lockoutTimeRemaining}s
+                </div>
+              )}
+            </div>
+          </Card>
+        </div>
+      </ConfigProvider>
+    );
+  }
+
   return (
     <ConfigProvider
       theme={{
@@ -1933,6 +2365,14 @@ function App() {
                   onClick={toggleCensored}
                   style={{ background: 'rgba(255, 255, 255, 0.05)', border: '1px solid var(--border-color)', color: '#ffffff' }}
                 />
+                {appPasscode && (
+                  <Button 
+                    size="small"
+                    icon={<LockOutlined />} 
+                    onClick={() => setIsLocked(true)}
+                    style={{ background: 'rgba(255, 255, 255, 0.05)', border: '1px solid var(--border-color)', color: '#ffffff' }}
+                  />
+                )}
                 <Button 
                   type="primary" 
                   size="small"
@@ -2025,6 +2465,15 @@ function App() {
                 >
                   {isCensored ? "Show Balances" : "Censor Balances"}
                 </Button>
+                {appPasscode && (
+                  <Button 
+                    icon={<LockOutlined />} 
+                    onClick={() => setIsLocked(true)}
+                    style={{ background: 'rgba(255, 255, 255, 0.05)', border: '1px solid var(--border-color)', color: '#ffffff', borderRadius: '6px', fontWeight: 'bold' }}
+                  >
+                    Lock App
+                  </Button>
+                )}
                 
                 <Button 
                   type="primary" 
@@ -2181,6 +2630,12 @@ function App() {
                       📈 Earnings
                     </button>
                     <button 
+                      className={`mobile-pill-btn ${mobileChartTab === 'analytics' ? 'active' : ''}`}
+                      onClick={() => setMobileChartTab('analytics')}
+                    >
+                      📊 Stats
+                    </button>
+                    <button 
                       className={`mobile-pill-btn ${mobileChartTab === 'allocation' ? 'active' : ''}`}
                       onClick={() => setMobileChartTab('allocation')}
                     >
@@ -2190,13 +2645,13 @@ function App() {
                       className={`mobile-pill-btn ${mobileChartTab === 'pnl' ? 'active' : ''}`}
                       onClick={() => setMobileChartTab('pnl')}
                     >
-                      📊 Portfolio P&L
+                      ⚖️ P&L
                     </button>
                     <button 
                       className={`mobile-pill-btn ${mobileChartTab === 'breakdown' ? 'active' : ''}`}
                       onClick={() => setMobileChartTab('breakdown')}
                     >
-                      📋 Realized P&L
+                      📋 Realized
                     </button>
                   </div>
 
@@ -2246,6 +2701,47 @@ function App() {
                           <Text type="secondary" style={{ color: '#5b6b80', fontSize: '12px' }}>No performance curve data.</Text>
                         </div>
                       )}
+                    </Card>
+                  )}
+
+                  {mobileChartTab === 'analytics' && (
+                    <Card title="📊 Trading Analytics" bordered={false}>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', padding: '6px 0' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '8px' }}>
+                          <span style={{ color: 'var(--text-secondary)', fontSize: '13px' }}>Total Trades</span>
+                          <strong style={{ color: '#ffffff', fontSize: '13px' }} className="financial-num">{tradingAnalytics.totalTrades} ({tradingAnalytics.buysCount} B / {tradingAnalytics.sellsCount} S)</strong>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '8px' }}>
+                          <span style={{ color: 'var(--text-secondary)', fontSize: '13px' }}>Win Rate</span>
+                          <strong style={{ color: tradingAnalytics.winRate >= 50 ? 'var(--success-color)' : 'var(--danger-color)', fontSize: '13px' }} className="financial-num">{tradingAnalytics.winRate.toFixed(1)}% ({tradingAnalytics.winCount}W / {tradingAnalytics.lossCount}L)</strong>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '8px' }}>
+                          <span style={{ color: 'var(--text-secondary)', fontSize: '13px' }}>Profit Factor</span>
+                          <strong style={{ color: tradingAnalytics.winRate >= 50 ? 'var(--success-color)' : 'var(--danger-color)', fontSize: '13px' }} className="financial-num">
+                            {tradingAnalytics.profitFactor === Infinity ? '∞' : tradingAnalytics.profitFactor.toFixed(2)}
+                          </strong>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '8px' }}>
+                          <span style={{ color: 'var(--text-secondary)', fontSize: '13px' }}>Risk-Reward</span>
+                          <strong style={{ color: '#ffffff', fontSize: '13px' }} className="financial-num">1 : {tradingAnalytics.riskRewardRatio.toFixed(2)}</strong>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '8px' }}>
+                          <span style={{ color: 'var(--text-secondary)', fontSize: '13px' }}>Avg Win / Loss</span>
+                          <span className="financial-num" style={{ fontSize: '12px' }}>
+                            <strong style={{ color: 'var(--success-color)' }}>{formatCurrency(tradingAnalytics.avgWin)}</strong>
+                            <strong style={{ color: 'var(--text-muted)', margin: '0 4px' }}>/</strong>
+                            <strong style={{ color: 'var(--danger-color)' }}>{formatCurrency(tradingAnalytics.avgLoss)}</strong>
+                          </span>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', paddingBottom: '4px' }}>
+                          <span style={{ color: 'var(--text-secondary)', fontSize: '13px' }}>Max Win / Loss</span>
+                          <span className="financial-num" style={{ fontSize: '12px' }}>
+                            <strong style={{ color: 'var(--success-color)' }}>+{formatCurrency(tradingAnalytics.maxWinVal)}</strong>
+                            <strong style={{ color: 'var(--text-muted)', margin: '0 4px' }}>/</strong>
+                            <strong style={{ color: 'var(--danger-color)' }}>-{formatCurrency(tradingAnalytics.maxLossVal)}</strong>
+                          </span>
+                        </div>
+                      </div>
                     </Card>
                   )}
 
@@ -2638,6 +3134,76 @@ function App() {
                             <Text type="secondary" style={{ color: '#5b6b80' }}>No trade history to calculate realized performance curve.</Text>
                           </div>
                         )}
+                      </Card>
+                    </Col>
+                  </Row>
+
+                  {/* Trading Analytics Card Row */}
+                  <Row gutter={[24, 24]}>
+                    <Col span={24}>
+                      <Card title="📊 Trading Analytics & Statistics" bordered={false}>
+                        <Row gutter={[16, 16]}>
+                          <Col xs={12} sm={8} md={4}>
+                            <div style={{ textAlign: 'center', background: 'rgba(255, 255, 255, 0.02)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '12px 6px' }}>
+                              <Text type="secondary" style={{ fontSize: '10px', textTransform: 'uppercase', display: 'block', marginBottom: '6px', fontWeight: 600 }}>Total Trades</Text>
+                              <Title level={4} style={{ color: '#ffffff', margin: 0 }} className="financial-num">{tradingAnalytics.totalTrades}</Title>
+                              <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '4px' }}>
+                                {tradingAnalytics.buysCount} Buy | {tradingAnalytics.sellsCount} Sell
+                              </div>
+                            </div>
+                          </Col>
+                          <Col xs={12} sm={8} md={4}>
+                            <div style={{ textAlign: 'center', background: 'rgba(255, 255, 255, 0.02)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '12px 6px' }}>
+                              <Text type="secondary" style={{ fontSize: '10px', textTransform: 'uppercase', display: 'block', marginBottom: '6px', fontWeight: 600 }}>Win Rate</Text>
+                              <Title level={4} style={{ color: tradingAnalytics.winRate >= 50 ? 'var(--success-color)' : 'var(--danger-color)', margin: 0 }} className="financial-num">
+                                {tradingAnalytics.winRate.toFixed(1)}%
+                              </Title>
+                              <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '4px' }}>
+                                {tradingAnalytics.winCount} W - {tradingAnalytics.lossCount} L
+                              </div>
+                            </div>
+                          </Col>
+                          <Col xs={12} sm={8} md={4}>
+                            <div style={{ textAlign: 'center', background: 'rgba(255, 255, 255, 0.02)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '12px 6px' }}>
+                              <Text type="secondary" style={{ fontSize: '10px', textTransform: 'uppercase', display: 'block', marginBottom: '6px', fontWeight: 600 }}>Profit Factor</Text>
+                              <Title level={4} style={{ color: tradingAnalytics.profitFactor >= 1.5 ? 'var(--success-color)' : (tradingAnalytics.profitFactor >= 1 ? '#ffffff' : 'var(--danger-color)'), margin: 0 }} className="financial-num">
+                                {tradingAnalytics.profitFactor === Infinity ? '∞' : tradingAnalytics.profitFactor.toFixed(2)}
+                              </Title>
+                              <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '4px' }}>
+                                Gross Profit / Loss
+                              </div>
+                            </div>
+                          </Col>
+                          <Col xs={12} sm={8} md={4}>
+                            <div style={{ textAlign: 'center', background: 'rgba(255, 255, 255, 0.02)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '12px 6px' }}>
+                              <Text type="secondary" style={{ fontSize: '10px', textTransform: 'uppercase', display: 'block', marginBottom: '6px', fontWeight: 600 }}>Risk-Reward Ratio</Text>
+                              <Title level={4} style={{ color: '#ffffff', margin: 0 }} className="financial-num">
+                                1 : {tradingAnalytics.riskRewardRatio.toFixed(2)}
+                              </Title>
+                              <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '4px' }}>
+                                Avg Loss vs Avg Win
+                              </div>
+                            </div>
+                          </Col>
+                          <Col xs={12} sm={8} md={4}>
+                            <div style={{ textAlign: 'center', background: 'rgba(255, 255, 255, 0.02)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '12px 6px' }}>
+                              <Text type="secondary" style={{ fontSize: '10px', textTransform: 'uppercase', display: 'block', marginBottom: '6px', fontWeight: 600 }}>Avg Win / Avg Loss</Text>
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', marginTop: '4px' }} className="financial-num">
+                                <span style={{ color: 'var(--success-color)', fontSize: '13px', fontWeight: 'bold' }}>{formatCurrency(tradingAnalytics.avgWin)}</span>
+                                <span style={{ color: 'var(--danger-color)', fontSize: '13px', fontWeight: 'bold' }}>{formatCurrency(tradingAnalytics.avgLoss)}</span>
+                              </div>
+                            </div>
+                          </Col>
+                          <Col xs={12} sm={8} md={4}>
+                            <div style={{ textAlign: 'center', background: 'rgba(255, 255, 255, 0.02)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '12px 6px' }}>
+                              <Text type="secondary" style={{ fontSize: '10px', textTransform: 'uppercase', display: 'block', marginBottom: '6px', fontWeight: 600 }}>Max Win / Max Loss</Text>
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', marginTop: '4px' }} className="financial-num">
+                                <span style={{ color: 'var(--success-color)', fontSize: '13px', fontWeight: 'bold' }}>+{formatCurrency(tradingAnalytics.maxWinVal)}</span>
+                                <span style={{ color: 'var(--danger-color)', fontSize: '13px', fontWeight: 'bold' }}>-{formatCurrency(tradingAnalytics.maxLossVal)}</span>
+                              </div>
+                            </div>
+                          </Col>
+                        </Row>
                       </Card>
                     </Col>
                   </Row>
@@ -3537,6 +4103,103 @@ function App() {
                     </Space>
                   </Card>
 
+                  {/* App Security & Lock Card */}
+                  <Card title="🔒 App Security & Lock" bordered={false}>
+                    <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+                      <p style={{ color: 'var(--text-secondary)', fontSize: '13px', margin: 0 }}>
+                        Secure your trading journal data with a lock passcode. When enabled, you must enter the passcode to access the terminal.
+                      </p>
+                      
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginTop: '10px' }}>
+                        <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+                          <strong style={{ color: '#ffffff', minWidth: '160px' }}>Enable Passcode Lock:</strong>
+                          <Switch 
+                            checked={!!appPasscode} 
+                            onChange={(checked) => {
+                              if (!checked) {
+                                setAppPasscode('');
+                                localStorage.removeItem('alphatrader_passcode');
+                                message.success('Passcode lock disabled.');
+                                if (!isCloudMode) {
+                                  axios.post(`${API_BASE}/api/google-sheet-settings`, {
+                                    google_sheet_id: googleSheetId,
+                                    google_apps_script_url: googleAppsScriptUrl,
+                                    app_passcode: ''
+                                  }).catch(err => console.error("Syncing disabled passcode failed:", err));
+                                }
+                              } else {
+                                message.info('Please enter a passcode below to enable lock.');
+                              }
+                            }}
+                          />
+                        </div>
+
+                        <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+                          <strong style={{ color: '#ffffff', minWidth: '160px' }}>Passcode:</strong>
+                          <Input.Password 
+                            placeholder="Enter 4-6 digit code or password" 
+                            value={appPasscode} 
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setAppPasscode(val);
+                              if (val) {
+                                localStorage.setItem('alphatrader_passcode', val);
+                              } else {
+                                localStorage.removeItem('alphatrader_passcode');
+                              }
+                            }} 
+                            style={{ maxWidth: '400px', flex: 1 }}
+                          />
+                        </div>
+
+                        <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+                          <strong style={{ color: '#ffffff', minWidth: '160px' }}>Auto-Lock on Idle:</strong>
+                          <Select 
+                            value={autoLockMinutes} 
+                            onChange={(val) => {
+                              setAutoLockMinutes(val);
+                              localStorage.setItem('alphatrader_autolock', val.toString());
+                              message.success(`Auto-lock configured for ${val === 0 ? 'Disabled' : `${val} minute(s)`}.`);
+                            }}
+                            style={{ width: '180px' }}
+                          >
+                            <Option value={0}>Disabled</Option>
+                            <Option value={1}>1 Minute</Option>
+                            <Option value={3}>3 Minutes</Option>
+                            <Option value={5}>5 Minutes</Option>
+                            <Option value={10}>10 Minutes</Option>
+                            <Option value={30}>30 Minutes</Option>
+                          </Select>
+                        </div>
+
+                        <div style={{ marginTop: '5px' }}>
+                          <Button 
+                            type="primary" 
+                            onClick={async () => {
+                              localStorage.setItem('alphatrader_passcode', appPasscode);
+                              localStorage.setItem('alphatrader_autolock', autoLockMinutes.toString());
+                              if (!isCloudMode) {
+                                try {
+                                  await axios.post(`${API_BASE}/api/google-sheet-settings`, {
+                                    google_sheet_id: googleSheetId,
+                                    google_apps_script_url: googleAppsScriptUrl,
+                                    app_passcode: appPasscode
+                                  });
+                                } catch (e) {
+                                  console.error("Failed to sync passcode to backend:", e);
+                                }
+                              }
+                              message.success('Security settings saved successfully!');
+                            }} 
+                            style={{ color: '#06080f', fontWeight: 'bold' }}
+                          >
+                            Save Security Settings
+                          </Button>
+                        </div>
+                      </div>
+                    </Space>
+                  </Card>
+
                   {/* Feed & API Status Card */}
                   <Card title="Yahoo Finance Data Config" bordered={false}>
                     <Space direction="vertical" size="middle" style={{ width: '100%' }}>
@@ -3581,6 +4244,62 @@ function App() {
             </Spin>
           </Content>
         </Layout>
+
+        {/* MODAL: EDIT TRADE STRATEGY */}
+        <Modal
+          title={`Edit Strategy for ${editingTrade?.action.toUpperCase()} ${editingTrade?.assetName}`}
+          open={isEditStrategyModalOpen}
+          onCancel={() => {
+            setIsEditStrategyModalOpen(false);
+            setEditingTrade(null);
+            editStrategyForm.resetFields();
+          }}
+          footer={null}
+          width={500}
+        >
+          <Form
+            form={editStrategyForm}
+            layout="vertical"
+            onFinish={handleUpdateStrategy}
+          >
+            <Form.Item
+              name="why"
+              label="Strategy / Decision Reason"
+              rules={[{ required: true, message: 'Please input strategy reason' }]}
+            >
+              <Select placeholder="Select or type custom strategy" showSearch optionFilterProp="children" mode="combobox">
+                <Option value="CDC Action Zone">CDC Action Zone</Option>
+                <Option value="Breakout">Breakout</Option>
+                <Option value="EMA Cross">EMA Cross</Option>
+                <Option value="Support/Resistance Bounce">Support/Resistance Bounce</Option>
+                <Option value="Value Investment">Value Investment</Option>
+                <Option value="Rebalance">Rebalance</Option>
+              </Select>
+            </Form.Item>
+
+            <Form.Item
+              name="remark"
+              label="Private Notes / Diary"
+            >
+              <Input.TextArea rows={4} placeholder="Log trade notes, emotional state, or exit plan..." />
+            </Form.Item>
+
+            <Form.Item style={{ marginBottom: 0, textAlign: 'right' }}>
+              <Space>
+                <Button onClick={() => {
+                  setIsEditStrategyModalOpen(false);
+                  setEditingTrade(null);
+                  editStrategyForm.resetFields();
+                }}>
+                  Cancel
+                </Button>
+                <Button type="primary" htmlType="submit" loading={isSyncing} style={{ color: '#06080f', fontWeight: 'bold' }}>
+                  Save Changes
+                </Button>
+              </Space>
+            </Form.Item>
+          </Form>
+        </Modal>
 
         {/* MODAL 1: LOG NEW TRADE */}
         <Modal
