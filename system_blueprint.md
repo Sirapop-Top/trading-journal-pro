@@ -441,3 +441,33 @@ In `frontend/src/App.jsx`, the `tradingAnalytics` useMemo hook was declared at l
 - `system_blueprint.md`
 
 **Commit:** `269284d` — `Fix Temporal Dead Zone ReferenceError by relocating tradingAnalytics hook`
+
+---
+
+### [2026-06-20] — Feature: Log Out Buttons, Custom Strategy Dropdown Items, and Transaction-Level Portfolio Transfers
+
+**Request:**
+1. Add a "Log Out" button to the onboarding setup page and settings panel to allow clearing cached connection keys.
+2. Add an "Other" option to the strategy dropdown so users can define custom strategies during editing.
+3. Migrate the portfolio transfer action from "Active Positions" to individual logged trade entries inside the "Trading Journal" log table.
+
+**Fixes & Enhancements Applied:**
+1. **Log Out Functionality:**
+   - Appended a **"Clear Settings & Log Out"** button to the onboarding login panel and a **"Log Out / Disconnect"** button inside the Settings Cloud sync card.
+   - Clears Google Sheet ID, Apps Script URL, and app security passcode from the browser's `localStorage` and resets connection states.
+2. **Custom Strategy Entry:**
+   - Modified the Edit Strategy modal select dropdown in `App.jsx` to include an `Other` item.
+   - When selected, a conditional `Custom Strategy` text input is displayed allowing custom inputs (e.g. `RSI > 70`).
+3. **Transaction-Level Portfolio Transfers:**
+   - **Excel Schema Update:** Updated local Excel loader/writer in `backend/main.py` to support writing and reading from a dedicated `Portfolio` column (Column O / 15).
+   - **Apps Script Sync Update:** Implemented `updateTradePortfolio` action to rewrite a specific trade's portfolio cell in Google Sheets. If the column header is missing, it dynamically adds the header column.
+   - **Backend API Endpoints:** Added `PUT /api/trades/{trade_id}/transfer` route to FastAPI.
+   - **Frontend UI Moves:** Removed the "Transfer" button from Active Positions grids and appended it to the actions column of each individual trade entry inside the main Trading Journal log table.
+
+**Files Changed:**
+- `backend/main.py`
+- `frontend/src/App.jsx`
+- `github_sheets_serverless_deployment_guide.md`
+- `system_blueprint.md`
+
+**Commit:** `0122240` — `Feature: added log out buttons, custom strategy dropdown, and trade-level transfers`
