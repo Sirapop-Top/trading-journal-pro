@@ -514,3 +514,21 @@ Add guidelines describing how to key in crypto asset names (symbols like BTC, ET
 - `system_blueprint.md`
 
 **Commit:** `b663b77` — `docs: add crypto ticker mapping guide to user manual and settings panel`
+
+---
+
+### [2026-06-20] — Fix: Crypto Ticker Suffix Verification Pre-mapping on Frontend
+
+**Request:**
+Fix a bug where typing `BTC` in the Asset Name with the category set to `Crypto` validates it as a Global Stock ETF on Yahoo Finance (due to collision with NYSE ClearShares Piton ETF ticker `BTC`) instead of Bitcoin (`BTC-USD`) when using the Google Sheets serverless cloud mode backend.
+
+**Root Cause:**
+While the FastAPI backend and updated Apps Script guide mapped `BTC` to `BTC-USD` on the server-side, a client might be running an older/un-updated Apps Script deployment. When the frontend sent the verification request, it passed `BTC` directly to Apps Script. Since Yahoo Finance has a legitimate Global Stock with ticker `BTC`, the Apps Script returned `valid: true`, bypassing the intended crypto check and saving it as `BTC` (ETF) instead of `BTC-USD` (Crypto).
+
+**Fixes & Enhancements Applied:**
+1. **Frontend Pre-mapping Suffix:** Added client-side mapping logic to `handleValidateTicker` and `handleAddTrade` in `frontend/src/App.jsx`. If the Asset Category is `Crypto` and the ticker symbol does not contain a dash (`-`), the app automatically appends `-USD` (e.g. `BTC` becomes `BTC-USD`) and updates the form input value *before* initiating verification or submitting the trade. This ensures correct verification against Yahoo Finance crypto tickers even if the deployed Google Sheets Apps Script has not been updated.
+2. **Form Auto-Correction:** Updating the form fields dynamically gives direct visual feedback to the user, showing that the system has corrected `BTC` to `BTC-USD`.
+
+**Files Changed:**
+- `frontend/src/App.jsx`
+- `system_blueprint.md`

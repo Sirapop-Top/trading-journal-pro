@@ -1058,7 +1058,13 @@ function App() {
       return;
     }
     
-    const tickerUpper = symbol.trim().toUpperCase();
+    let resolvedSymbol = symbol.trim().toUpperCase();
+    if (assetType === 'Crypto' && !resolvedSymbol.includes('-')) {
+      resolvedSymbol = `${resolvedSymbol}-USD`;
+      tradeForm.setFieldsValue({ assetName: resolvedSymbol });
+    }
+    const tickerUpper = resolvedSymbol;
+    
     setTickerValidation({ 
       status: 'validating', 
       message: 'Checking ticker on Yahoo Finance...', 
@@ -1074,13 +1080,13 @@ function App() {
         }
         const result = await callGoogleAppsScript(api.url, {
           action: 'validateTicker',
-          symbol: symbol,
+          symbol: resolvedSymbol,
           assetType: assetType
         });
         response = { data: result };
       } else {
         response = await axios.get(`${API_BASE}/api/validate-ticker`, {
-          params: { symbol, asset_type: assetType }
+          params: { symbol: resolvedSymbol, asset_type: assetType }
         });
       }
 
@@ -1112,7 +1118,13 @@ function App() {
 
   // Log new trade form submit
   const handleAddTrade = async (values) => {
-    const symbol = values.assetName.trim().toUpperCase();
+    let resolvedSymbol = values.assetName.trim().toUpperCase();
+    const assetType = values.assetType;
+    if (assetType === 'Crypto' && !resolvedSymbol.includes('-')) {
+      resolvedSymbol = `${resolvedSymbol}-USD`;
+      tradeForm.setFieldsValue({ assetName: resolvedSymbol });
+    }
+    const symbol = resolvedSymbol;
     const api = getApiUrl('/api/trades');
     
     // Validate ticker before adding trade
@@ -1127,13 +1139,13 @@ function App() {
           }
           const result = await callGoogleAppsScript(api.url, {
             action: 'validateTicker',
-            symbol: values.assetName,
-            assetType: values.assetType
+            symbol: symbol,
+            assetType: assetType
           });
           response = { data: result };
         } else {
           response = await axios.get(`${API_BASE}/api/validate-ticker`, {
-            params: { symbol: values.assetName, asset_type: values.assetType }
+            params: { symbol: symbol, asset_type: assetType }
           });
         }
         hideMsg();
@@ -1195,7 +1207,7 @@ function App() {
         id: (trades.length + 1).toString(),
         date: formattedDate,
         portfolio: values.portfolio,
-        assetName: values.assetName.trim().toUpperCase(),
+        assetName: symbol,
         assetType: values.assetType,
         currency: values.currency,
         action: values.action,
