@@ -88,7 +88,6 @@ Once the code is pushed, GitHub will automatically build your frontend using Git
 ## 📜 Apps Script API Code
 Paste this complete script inside your Google Apps Script editor (Step 1.6):
 
-```javascript
 function doGet(e) {
   var action = e.parameter.action;
   
@@ -105,45 +104,140 @@ function doPost(e) {
   var contents = JSON.parse(e.postData.contents);
   var action = contents.action;
   
-  if (action === "addTrade") {
-    return ContentService.createTextOutput(JSON.stringify(addTrade(contents.trade)))
+  try {
+    if (action === "addTrade") {
+      return ContentService.createTextOutput(JSON.stringify(addTrade(contents.trade)))
+        .setMimeType(ContentService.MimeType.JSON);
+    } else if (action === "deleteTrade") {
+      return ContentService.createTextOutput(JSON.stringify(deleteTrade(contents.tradeId)))
+        .setMimeType(ContentService.MimeType.JSON);
+    } else if (action === "addPortfolio") {
+      return ContentService.createTextOutput(JSON.stringify(addPortfolio(contents.name)))
+        .setMimeType(ContentService.MimeType.JSON);
+    } else if (action === "deletePortfolio") {
+      return ContentService.createTextOutput(JSON.stringify(deletePortfolio(contents.portfolioName)))
+        .setMimeType(ContentService.MimeType.JSON);
+    } else if (action === "renamePortfolio") {
+      return ContentService.createTextOutput(JSON.stringify(renamePortfolio(contents.oldName, contents.newName)))
+        .setMimeType(ContentService.MimeType.JSON);
+    } else if (action === "transferPosition") {
+      return ContentService.createTextOutput(JSON.stringify(transferPosition(contents.assetName, contents.targetPortfolio)))
+        .setMimeType(ContentService.MimeType.JSON);
+    } else if (action === "validateTicker") {
+      return ContentService.createTextOutput(JSON.stringify(validateTicker(contents.symbol, contents.assetType)))
+        .setMimeType(ContentService.MimeType.JSON);
+    } else if (action === "updateTradeStrategy") {
+      return ContentService.createTextOutput(JSON.stringify(updateTradeStrategy(contents.tradeId, contents.why, contents.remark)))
+        .setMimeType(ContentService.MimeType.JSON);
+    } else if (action === "updateTradePortfolio") {
+      return ContentService.createTextOutput(JSON.stringify(updateTradePortfolio(contents.tradeId, contents.targetPortfolio)))
+        .setMimeType(ContentService.MimeType.JSON);
+    } else if (action === "updatePortfolioConfig") {
+      return ContentService.createTextOutput(JSON.stringify(updatePortfolioConfig(contents.name, contents.initialCapital, contents.targetStocks)))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+    
+    // Fallback for legacy direct uploads
+    return ContentService.createTextOutput(JSON.stringify(addTrade(contents)))
       .setMimeType(ContentService.MimeType.JSON);
-  } else if (action === "deleteTrade") {
-    return ContentService.createTextOutput(JSON.stringify(deleteTrade(contents.tradeId)))
-      .setMimeType(ContentService.MimeType.JSON);
-  } else if (action === "addPortfolio") {
-    return ContentService.createTextOutput(JSON.stringify(addPortfolio(contents.name)))
-      .setMimeType(ContentService.MimeType.JSON);
-  } else if (action === "deletePortfolio") {
-    return ContentService.createTextOutput(JSON.stringify(deletePortfolio(contents.portfolioName)))
-      .setMimeType(ContentService.MimeType.JSON);
-  } else if (action === "renamePortfolio") {
-    return ContentService.createTextOutput(JSON.stringify(renamePortfolio(contents.oldName, contents.newName)))
-      .setMimeType(ContentService.MimeType.JSON);
-  } else if (action === "transferPosition") {
-    return ContentService.createTextOutput(JSON.stringify(transferPosition(contents.assetName, contents.targetPortfolio)))
-      .setMimeType(ContentService.MimeType.JSON);
-  } else if (action === "validateTicker") {
-    return ContentService.createTextOutput(JSON.stringify(validateTicker(contents.symbol, contents.assetType)))
-      .setMimeType(ContentService.MimeType.JSON);
-  } else if (action === "updateTradeStrategy") {
-    return ContentService.createTextOutput(JSON.stringify(updateTradeStrategy(contents.tradeId, contents.why, contents.remark)))
-      .setMimeType(ContentService.MimeType.JSON);
-  } else if (action === "updateTradePortfolio") {
-    return ContentService.createTextOutput(JSON.stringify(updateTradePortfolio(contents.tradeId, contents.targetPortfolio)))
-      .setMimeType(ContentService.MimeType.JSON);
-  } else if (action === "updatePortfolioConfig") {
-    return ContentService.createTextOutput(JSON.stringify(updatePortfolioConfig(contents.name, contents.initialCapital, contents.targetStocks)))
+  } catch (err) {
+    return ContentService.createTextOutput(JSON.stringify({ success: false, error: err.toString() }))
       .setMimeType(ContentService.MimeType.JSON);
   }
+}
+
+// Global schemas to keep the database structurally sound
+var JOURNAL_HEADERS = [
+  "Timestamp", "Date", "Asset Name", "Asset Type", "Currency", 
+  "Action", "Quantity", "Price/Unit", "Amount", "Current Price", 
+  "Current Value", "P&L", "P&L %", "Why (Decision Reason)", 
+  "Remark", "Portfolio", "Fee Rate (%)"
+];
+
+var PORTFOLIOS_HEADERS = [
+  "Asset Name", "Portfolio", "Portfolio Names", "Initial Capital", "Target Stocks"
+];
+
+// Self-healing database structure initialization
+function ensureTableStructure() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
   
-  // Fallback for legacy direct form uploads
-  return ContentService.createTextOutput(JSON.stringify(addTrade(contents)))
-    .setMimeType(ContentService.MimeType.JSON);
+  // 1. Repair or create Journal sheet
+  var journalSheet = ss.getSheetByName("Journal");
+  if (!journalSheet) {
+    journalSheet = ss.insertSheet("Journal");
+    journalSheet.getRange(1, 1, 1, JOURNAL_HEADERS.length).setValues([JOURNAL_HEADERS]);
+    journalSheet.getRange(1, 1, 1, JOURNAL_HEADERS.length).setFontWeight("bold");
+    journalSheet.setFrozenRows(1);
+  } else {
+    var lastCol = journalSheet.getLastColumn();
+    if (lastCol === 0) {
+      journalSheet.getRange(1, 1, 1, JOURNAL_HEADERS.length).setValues([JOURNAL_HEADERS]);
+      journalSheet.getRange(1, 1, 1, JOURNAL_HEADERS.length).setFontWeight("bold");
+      journalSheet.setFrozenRows(1);
+    } else {
+      var currentHeaders = journalSheet.getRange(1, 1, 1, lastCol).getValues()[0].map(function(h) {
+        return h.toString().toLowerCase().trim();
+      });
+      var missingHeaders = [];
+      for (var i = 0; i < JOURNAL_HEADERS.length; i++) {
+        var hLower = JOURNAL_HEADERS[i].toLowerCase().trim();
+        if (currentHeaders.indexOf(hLower) === -1) {
+          missingHeaders.push(JOURNAL_HEADERS[i]);
+        }
+      }
+      if (missingHeaders.length > 0) {
+        journalSheet.getRange(1, lastCol + 1, 1, missingHeaders.length).setValues([missingHeaders]);
+        journalSheet.getRange(1, lastCol + 1, 1, missingHeaders.length).setFontWeight("bold");
+      }
+    }
+  }
+  
+  // 2. Repair or create Portfolios sheet
+  var portfoliosSheet = ss.getSheetByName("Portfolios");
+  if (!portfoliosSheet) {
+    portfoliosSheet = ss.insertSheet("Portfolios");
+    portfoliosSheet.getRange(1, 1, 1, PORTFOLIOS_HEADERS.length).setValues([PORTFOLIOS_HEADERS]);
+    portfoliosSheet.getRange(1, 1, 1, PORTFOLIOS_HEADERS.length).setFontWeight("bold");
+    portfoliosSheet.setFrozenRows(1);
+    
+    // Set default seed data
+    portfoliosSheet.getRange(2, 3, 3, 1).setValues([["Main Trading"], ["BTC Stock"], ["Crypto"]]);
+    portfoliosSheet.getRange(2, 4, 3, 2).setValues([
+      [2000000, 50],
+      [2000000, 50],
+      [2000000, 50]
+    ]);
+  } else {
+    var lastCol = portfoliosSheet.getLastColumn();
+    if (lastCol === 0) {
+      portfoliosSheet.getRange(1, 1, 1, PORTFOLIOS_HEADERS.length).setValues([PORTFOLIOS_HEADERS]);
+      portfoliosSheet.getRange(1, 1, 1, PORTFOLIOS_HEADERS.length).setFontWeight("bold");
+      portfoliosSheet.setFrozenRows(1);
+    } else {
+      var currentHeaders = portfoliosSheet.getRange(1, 1, 1, lastCol).getValues()[0].map(function(h) {
+        return h.toString().toLowerCase().trim();
+      });
+      var missingHeaders = [];
+      for (var i = 0; i < PORTFOLIOS_HEADERS.length; i++) {
+        var hLower = PORTFOLIOS_HEADERS[i].toLowerCase().trim();
+        if (currentHeaders.indexOf(hLower) === -1) {
+          missingHeaders.push(PORTFOLIOS_HEADERS[i]);
+        }
+      }
+      if (missingHeaders.length > 0) {
+        portfoliosSheet.getRange(1, lastCol + 1, 1, missingHeaders.length).setValues([missingHeaders]);
+        portfoliosSheet.getRange(1, lastCol + 1, 1, missingHeaders.length).setFontWeight("bold");
+      }
+    }
+  }
 }
 
 function getDashboardData() {
-  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Journal");
+  ensureTableStructure();
+  
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("Journal");
   var rows = sheet.getDataRange().getValues();
   
   var trades = [];
@@ -155,6 +249,7 @@ function getDashboardData() {
     return {
       trades: [],
       portfolios: portfolios,
+      portfolioConfigs: {},
       livePrices: {},
       liveRates: { "THB": 1.0, "USD": 35.0, "EUR": 38.0 },
       syncTime: new Date().toISOString()
@@ -163,7 +258,6 @@ function getDashboardData() {
   
   var headers = rows[0].map(function(h) { return h.toString().toLowerCase().trim(); });
   
-  // Helper to find column index matching keywords
   function findColIdx(keywords) {
     for (var i = 0; i < headers.length; i++) {
       var h = headers[i];
@@ -185,11 +279,13 @@ function getDashboardData() {
   var priceUnitIdx = findColIdx(["price/unit", "price_unit", "price unit", "price"]);
   var whyIdx = findColIdx(["why", "decision", "reason"]);
   var remarkIdx = findColIdx(["remark", "note"]);
+  var portfolioIdx = findColIdx(["portfolio", "port"]);
+  var feeRateIdx = findColIdx(["fee rate", "fee_rate", "fee %", "fee", "fee_pct"]);
   
   for (var i = 1; i < rows.length; i++) {
     var row = rows[i];
-    var assetName = assetNameIdx !== -1 ? row[assetNameIdx].toString().trim() : "";
-    var assetType = assetTypeIdx !== -1 ? row[assetTypeIdx].toString().trim() : "";
+    var assetName = assetNameIdx !== -1 ? row[assetNameIdx].toString().trim().toUpperCase() : "";
+    var assetType = assetTypeIdx !== -1 ? row[assetTypeIdx].toString().trim() : "Thai Stock";
     
     if (!assetName) continue;
     
@@ -206,20 +302,32 @@ function getDashboardData() {
     }
     
     var portfolio = "Main Trading";
-    if (assetType.toLowerCase() === "crypto") {
-      portfolio = "Crypto";
-    } else if (assetType.toLowerCase() === "global stock" || assetType.toLowerCase() === "us stock") {
-      portfolio = "BTC Stock";
+    if (portfolioIdx !== -1 && row[portfolioIdx]) {
+      portfolio = row[portfolioIdx].toString().trim();
+    } else {
+      if (assetType.toLowerCase() === "crypto") {
+        portfolio = "Crypto";
+      } else if (assetType.toLowerCase() === "global stock" || assetType.toLowerCase() === "us stock") {
+        portfolio = "BTC Stock";
+      }
     }
     
-    var qty = quantityIdx !== -1 ? parseFloat(row[quantityIdx]) : 0;
-    if (isNaN(qty)) qty = 0;
+    var qty = quantityIdx !== -1 ? parseFloat(row[quantityIdx]) : 0.0;
+    if (isNaN(qty)) qty = 0.0;
     
-    var price = priceUnitIdx !== -1 ? parseFloat(row[priceUnitIdx]) : 0;
-    if (isNaN(price)) price = 0;
+    var price = priceUnitIdx !== -1 ? parseFloat(row[priceUnitIdx]) : 0.0;
+    if (isNaN(price)) price = 0.0;
+    
+    var feeRate = 0.0;
+    if (feeRateIdx !== -1 && row[feeRateIdx]) {
+      try {
+        var rawFee = row[feeRateIdx].toString().replace("%", "").trim();
+        feeRate = parseFloat(rawFee) || 0.0;
+      } catch (e) {}
+    }
     
     var trade = {
-      id: (i + 1).toString(), // ID = actual sheet row number (header=row1, data row i=1 → row 2 → ID "2")
+      id: (i + 1).toString(), 
       date: dateVal,
       portfolio: portfolio,
       assetName: assetName,
@@ -229,7 +337,8 @@ function getDashboardData() {
       quantity: qty,
       priceUnit: price,
       why: whyIdx !== -1 && row[whyIdx] ? row[whyIdx].toString().trim() : "",
-      remark: remarkIdx !== -1 && row[remarkIdx] ? row[remarkIdx].toString().trim() : ""
+      remark: remarkIdx !== -1 && row[remarkIdx] ? row[remarkIdx].toString().trim() : "",
+      feeRate: feeRate
     };
     
     trades.push(trade);
@@ -244,42 +353,91 @@ function getDashboardData() {
     }
   }
   
-  // Fetch live prices and rates from Yahoo Finance
+  // High Performance Parallel Market Data Fetch (Converts O(N) calls to O(1) concurrent batch request)
   var livePrices = {};
   var liveRates = { "THB": 1.0, "USD": 35.0, "EUR": 38.0 };
   
   try {
-    liveRates.USD = fetchRateFromYahoo("USDTHB=X") || 35.0;
-    liveRates.EUR = fetchRateFromYahoo("EURTHB=X") || 38.0;
-  } catch (e) {}
-  
-  for (var j = 0; j < uniqueAssets.length; j++) {
-    var asset = uniqueAssets[j];
-    var type = (assetTypesMap && assetTypesMap[asset]) || "";
+    var fetchRequests = [];
+    fetchRequests.push({ url: "https://query1.finance.yahoo.com/v8/finance/chart/USDTHB=X", muteHttpExceptions: true });
+    fetchRequests.push({ url: "https://query1.finance.yahoo.com/v8/finance/chart/EURTHB=X", muteHttpExceptions: true });
+    
+    for (var j = 0; j < uniqueAssets.length; j++) {
+      var asset = uniqueAssets[j];
+      var type = (assetTypesMap && assetTypesMap[asset]) || "";
+      var symbol = asset;
+      var upperAsset = asset.toUpperCase().trim();
+      var tickerMap = {
+        "BJC": "BJC.BK",
+        "KCE": "KCE.BK",
+        "JMART": "JMART.BK",
+        "ROJNA": "ROJNA.BK",
+        "MSTR": "MSTR"
+      };
+      
+      if (tickerMap[upperAsset]) {
+        symbol = tickerMap[upperAsset];
+      } else {
+        var typeLower = (type || "").toLowerCase().trim();
+        if (typeLower === "crypto" && upperAsset.indexOf("-") === -1) {
+          symbol = upperAsset + "-USD";
+        } else if (typeLower === "thai stock" && !upperAsset.endsWith(".BK")) {
+          symbol = upperAsset + ".BK";
+        }
+      }
+      fetchRequests.push({ url: "https://query1.finance.yahoo.com/v8/finance/chart/" + symbol, muteHttpExceptions: true });
+    }
+    
+    var responses = UrlFetchApp.fetchAll(fetchRequests);
+    
     try {
-      var price = fetchPriceFromYahoo(asset, type);
-      if (price) livePrices[asset] = price;
-    } catch(err) {}
-  }
+      var usdRes = JSON.parse(responses[0].getContentText());
+      liveRates.USD = usdRes.chart.result[0].meta.regularMarketPrice || 35.0;
+    } catch(e) {}
+    
+    try {
+      var eurRes = JSON.parse(responses[1].getContentText());
+      liveRates.EUR = eurRes.chart.result[0].meta.regularMarketPrice || 38.0;
+    } catch(e) {}
+    
+    for (var j = 0; j < uniqueAssets.length; j++) {
+      var asset = uniqueAssets[j];
+      var responseIndex = j + 2; 
+      try {
+        var res = JSON.parse(responses[responseIndex].getContentText());
+        var price = res.chart.result[0].meta.regularMarketPrice;
+        if (price !== undefined && price !== null) {
+          livePrices[asset] = price;
+        }
+      } catch(e) {}
+    }
+  } catch(e) {}
   
-  // Override or fetch portfolios custom names and configs from the "Portfolios" sheet if it exists
+  // Read Custom Portfolios configurations
   var portfolioConfigs = {};
   try {
-    var pSheet = getOrCreatePortfoliosSheet();
+    var pSheet = ss.getSheetByName("Portfolios");
     var pRowIdx = pSheet.getLastRow();
     if (pRowIdx >= 2) {
-      if (pSheet.getLastColumn() < 5) {
-        pSheet.getRange(1, 4, 1, 2).setValues([["Initial Capital", "Target Stocks"]]);
-      }
-      var customPorts = pSheet.getRange(2, 3, pRowIdx - 1, 3).getValues();
+      var pHeaders = pSheet.getRange(1, 1, 1, pSheet.getLastColumn()).getValues()[0].map(function(h) {
+        return h.toString().toLowerCase().trim();
+      });
+      
+      var pNameColIdx = pHeaders.indexOf("portfolio names");
+      var pCapitalColIdx = pHeaders.indexOf("initial capital");
+      var pStocksColIdx = pHeaders.indexOf("target stocks");
+      
+      var customPorts = pSheet.getRange(2, 1, pRowIdx - 1, pSheet.getLastColumn()).getValues();
       var tempPorts = [];
       for (var k = 0; k < customPorts.length; k++) {
-        var pName = customPorts[k][0].toString().trim();
-        if (pName) {
-          tempPorts.push(pName);
-          var capital = parseFloat(customPorts[k][1]) || 2000000;
-          var stocks = parseInt(customPorts[k][2]) || 50;
-          portfolioConfigs[pName] = { initialCapital: capital, targetStocks: stocks };
+        if (pNameColIdx !== -1) {
+          var pName = customPorts[k][pNameColIdx].toString().trim();
+          if (pName) {
+            tempPorts.push(pName);
+            var capital = pCapitalColIdx !== -1 ? (parseFloat(customPorts[k][pCapitalColIdx]) || 2000000.0) : 2000000.0;
+            var stocks = pStocksColIdx !== -1 ? (parseInt(customPorts[k][pStocksColIdx]) || 50) : 50;
+            portfolioConfigs[pName] = { initialCapital: capital, targetStocks: stocks };
+          }
         }
       }
       if (tempPorts.length > 0) {
@@ -287,7 +445,7 @@ function getDashboardData() {
       }
     }
   } catch(e) {}
-
+  
   return {
     trades: trades,
     portfolios: portfolios,
@@ -298,56 +456,24 @@ function getDashboardData() {
   };
 }
 
-function fetchRateFromYahoo(symbol) {
-  try {
-    var response = UrlFetchApp.fetch("https://query1.finance.yahoo.com/v8/finance/chart/" + symbol, { muteHttpExceptions: true });
-    var json = JSON.parse(response.getContentText());
-    var meta = json.chart.result[0].meta;
-    return meta.regularMarketPrice;
-  } catch (e) {
-    return null;
-  }
-}
-
-function fetchPriceFromYahoo(asset, assetType) {
-  var symbol = asset;
-  var upperAsset = asset.toUpperCase().trim();
-  var tickerMap = {
-    "BJC": "BJC.BK",
-    "KCE": "KCE.BK",
-    "JMART": "JMART.BK",
-    "ROJNA": "ROJNA.BK",
-    "MSTR": "MSTR"
-  };
-  
-  if (tickerMap[upperAsset]) {
-    symbol = tickerMap[upperAsset];
-  } else {
-    var typeLower = (assetType || "").toLowerCase().trim();
-    if (typeLower === "crypto" && upperAsset.indexOf("-") === -1) {
-      symbol = upperAsset + "-USD";
-    } else if (typeLower === "thai stock" && !upperAsset.endsWith(".BK")) {
-      symbol = upperAsset + ".BK";
-    }
-  }
-  
-  return fetchRateFromYahoo(symbol);
-}
-
+// Atomic Batch Write (Writes all columns concurrently to avoid row-loop round-trip lag)
 function addTrade(trade) {
-  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Journal");
+  ensureTableStructure();
+  
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("Journal");
   var lastRow = sheet.getLastRow();
   var newRowIdx = lastRow + 1;
+  var lastCol = sheet.getLastColumn();
   
-  var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  var headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
   var headersLower = headers.map(function(h) { return h.toString().toLowerCase().trim(); });
   
-  function writeCell(keywords, value) {
+  function getIndex(keywords) {
     for (var i = 0; i < headersLower.length; i++) {
       var h = headersLower[i];
       for (var k = 0; k < keywords.length; k++) {
         if (h.indexOf(keywords[k]) !== -1) {
-          sheet.getRange(newRowIdx, i + 1).setValue(value);
           return i;
         }
       }
@@ -355,180 +481,168 @@ function addTrade(trade) {
     return -1;
   }
   
-  var dateVal = trade.date || Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd");
+  var rowValues = new Array(lastCol).fill("");
   
-  var tsToWrite = trade.timestamp ? trade.timestamp : new Date();
-  writeCell(["timestamp"], tsToWrite);
-  writeCell(["date"], new Date(dateVal));
-  writeCell(["asset name", "asset_name", "asset"], trade.assetName);
-  writeCell(["asset type", "asset_type", "type"], trade.assetType);
-  writeCell(["currency"], trade.currency);
-  writeCell(["action"], trade.action);
-  writeCell(["quantity", "qty"], trade.quantity);
-  writeCell(["price/unit", "price_unit", "price unit", "price"], trade.priceUnit);
-  writeCell(["why (decision reason)", "why", "decision", "reason"], trade.why);
-  writeCell(["remark", "note"], trade.remark || "");
+  var tsIdx = getIndex(["timestamp"]);
+  var dateIdx = getIndex(["date"]);
+  var assetNameIdx = getIndex(["asset name", "asset_name", "asset"]);
+  var assetTypeIdx = getIndex(["asset type", "asset_type", "type"]);
+  var currencyIdx = getIndex(["currency"]);
+  var actionIdx = getIndex(["action"]);
+  var quantityIdx = getIndex(["quantity", "qty"]);
+  var priceUnitIdx = getIndex(["price/unit", "price_unit", "price unit", "price"]);
+  var whyIdx = getIndex(["why (decision reason)", "why", "decision", "reason"]);
+  var remarkIdx = getIndex(["remark", "note"]);
+  var portfolioIdx = getIndex(["portfolio", "port"]);
+  var feeRateIdx = getIndex(["fee rate", "fee_rate", "fee %", "fee", "fee_pct"]);
   
-  var portWritten = writeCell(["portfolio", "port"], trade.portfolio || "Main Trading");
-  if (portWritten === -1 && trade.portfolio) {
-    var newCol = sheet.getLastColumn() + 1;
-    sheet.getRange(1, newCol).setValue("Portfolio");
-    sheet.getRange(newRowIdx, newCol).setValue(trade.portfolio);
-    headersLower.push("portfolio");
+  var amountIdx = getIndex(["amount"]);
+  var curPriceIdx = getIndex(["current price"]);
+  var curValueIdx = getIndex(["current value"]);
+  var pnlIdx = getIndex(["p&l"]);
+  var pnlPctIdx = getIndex(["p&l %"]);
+  
+  function sanitizeString(str) {
+    if (!str) return "";
+    var s = str.toString().trim();
+    if (s.indexOf("=") === 0 || s.indexOf("+") === 0 || s.indexOf("-") === 0 || s.indexOf("@") === 0) {
+      return "'" + s; // Escape formula injection
+    }
+    return s;
   }
-
-  var feeRateWritten = writeCell(["fee rate", "fee_rate", "fee %", "fee"], trade.feeRate !== undefined ? trade.feeRate : 0.0);
-  if (feeRateWritten === -1 && trade.feeRate !== undefined) {
-    var newCol = sheet.getLastColumn() + 1;
-    sheet.getRange(1, newCol).setValue("Fee Rate (%)");
-    sheet.getRange(newRowIdx, newCol).setValue(trade.feeRate);
-    headersLower.push("fee rate (%)");
+  
+  if (tsIdx !== -1) rowValues[tsIdx] = trade.timestamp ? new Date(trade.timestamp) : new Date();
+  if (dateIdx !== -1) rowValues[dateIdx] = trade.date ? new Date(trade.date) : new Date();
+  if (assetNameIdx !== -1) rowValues[assetNameIdx] = (trade.assetName || "").toString().trim().toUpperCase();
+  if (assetTypeIdx !== -1) rowValues[assetTypeIdx] = trade.assetType || "Thai Stock";
+  if (currencyIdx !== -1) rowValues[currencyIdx] = trade.currency || "THB";
+  if (actionIdx !== -1) rowValues[actionIdx] = trade.action || "Buy";
+  if (quantityIdx !== -1) rowValues[quantityIdx] = parseFloat(trade.quantity) || 0.0;
+  if (priceUnitIdx !== -1) rowValues[priceUnitIdx] = parseFloat(trade.priceUnit) || 0.0;
+  if (whyIdx !== -1) rowValues[whyIdx] = sanitizeString(trade.why);
+  if (remarkIdx !== -1) rowValues[remarkIdx] = sanitizeString(trade.remark);
+  if (portfolioIdx !== -1) rowValues[portfolioIdx] = trade.portfolio || "Main Trading";
+  if (feeRateIdx !== -1) rowValues[feeRateIdx] = parseFloat(trade.feeRate) || 0.0;
+  
+  function getColLetter(colIdx) {
+    if (colIdx === -1) return "";
+    var temp = colIdx + 1;
+    var letter = "";
+    while (temp > 0) {
+      var mod = (temp - 1) % 26;
+      letter = String.fromCharCode(65 + mod) + letter;
+      temp = Math.floor((temp - mod - 1) / 26);
+    }
+    return letter;
   }
   
-  // Try to write formulas dynamically for computed columns (Amount, Current Value, P&L, etc.)
-  var qtyIdx = findIdxInArray(headersLower, ["quantity", "qty"]);
-  var priceIdx = findIdxInArray(headersLower, ["price/unit", "price_unit", "price unit", "price"]);
-  var curPriceIdx = findIdxInArray(headersLower, ["current price"]);
-  var actionIdx = findIdxInArray(headersLower, ["action"]);
-  var amountIdx = findIdxInArray(headersLower, ["amount"]);
-  var curValueIdx = findIdxInArray(headersLower, ["current value"]);
-  var pnlIdx = findIdxInArray(headersLower, ["p&l"]);
-  var pnlPctIdx = findIdxInArray(headersLower, ["p&l %"]);
-  var feeIdx = findIdxInArray(headersLower, ["fee rate", "fee_rate", "fee %", "fee"]);
+  var qtyLetter = getColLetter(quantityIdx);
+  var priceLetter = getColLetter(priceUnitIdx);
+  var actionLetter = getColLetter(actionIdx);
+  var curPriceLetter = getColLetter(curPriceIdx);
+  var amountLetter = getColLetter(amountIdx);
+  var pnlLetter = getColLetter(pnlIdx);
+  var feeLetter = getColLetter(feeRateIdx);
   
-  var qtyLetter = getColumnLetter(qtyIdx + 1);
-  var priceLetter = getColumnLetter(priceIdx + 1);
-  var actionLetter = getColumnLetter(actionIdx + 1);
-  var curPriceLetter = getColumnLetter(curPriceIdx + 1);
-  var amountLetter = getColumnLetter(amountIdx + 1);
-  var pnlLetter = getColumnLetter(pnlIdx + 1);
-  var feeLetter = getColumnLetter(feeIdx + 1);
- 
+  // Set calculation formulas
   if (amountIdx !== -1 && qtyLetter && priceLetter) {
     if (feeLetter) {
-      sheet.getRange(newRowIdx, amountIdx + 1).setFormula('=IF(' + actionLetter + newRowIdx + '="Buy",' + qtyLetter + newRowIdx + '*' + priceLetter + newRowIdx + '*(1+' + feeLetter + newRowIdx + '/100),' + qtyLetter + newRowIdx + '*' + priceLetter + newRowIdx + '*(1-' + feeLetter + newRowIdx + '/100))');
+      rowValues[amountIdx] = '=IF(' + actionLetter + newRowIdx + '="Buy",' + qtyLetter + newRowIdx + '*' + priceLetter + newRowIdx + '*(1+' + feeLetter + newRowIdx + '/100),' + qtyLetter + newRowIdx + '*' + priceLetter + newRowIdx + '*(1-' + feeLetter + newRowIdx + '/100))';
     } else {
-      sheet.getRange(newRowIdx, amountIdx + 1).setFormula("=" + qtyLetter + newRowIdx + "*" + priceLetter + newRowIdx);
+      rowValues[amountIdx] = "=" + qtyLetter + newRowIdx + "*" + priceLetter + newRowIdx;
     }
   }
   
   if (curPriceIdx !== -1) {
-    sheet.getRange(newRowIdx, curPriceIdx + 1).setValue(trade.priceUnit); // default live price to purchase price
+    rowValues[curPriceIdx] = parseFloat(trade.priceUnit) || 0.0;
   }
   
   if (curValueIdx !== -1 && qtyLetter && curPriceLetter) {
-    sheet.getRange(newRowIdx, curValueIdx + 1).setFormula("=" + qtyLetter + newRowIdx + "*" + curPriceLetter + newRowIdx);
+    rowValues[curValueIdx] = "=" + qtyLetter + newRowIdx + "*" + curPriceLetter + newRowIdx;
   }
   
   if (pnlIdx !== -1 && actionLetter && curPriceLetter && priceLetter && qtyLetter) {
-    sheet.getRange(newRowIdx, pnlIdx + 1).setFormula('=IF(' + actionLetter + newRowIdx + '="Buy",(' + curPriceLetter + newRowIdx + '-' + priceLetter + newRowIdx + ')*' + qtyLetter + newRowIdx + ',(' + priceLetter + newRowIdx + '-' + curPriceLetter + newRowIdx + ')*' + qtyLetter + newRowIdx + ')');
+    rowValues[pnlIdx] = '=IF(' + actionLetter + newRowIdx + '="Buy",(' + curPriceLetter + newRowIdx + '-' + priceLetter + newRowIdx + ')*' + qtyLetter + newRowIdx + ',(' + priceLetter + newRowIdx + '-' + curPriceLetter + newRowIdx + ')*' + qtyLetter + newRowIdx + ')';
   }
   
   if (pnlPctIdx !== -1 && pnlLetter && amountLetter) {
-    sheet.getRange(newRowIdx, pnlPctIdx + 1).setFormula("=IF(" + amountLetter + newRowIdx + "=0,0," + pnlLetter + newRowIdx + "/" + amountLetter + newRowIdx + ")");
+    rowValues[pnlPctIdx] = "=IF(" + amountLetter + newRowIdx + "=0,0," + pnlLetter + newRowIdx + "/" + amountLetter + newRowIdx + ")";
   }
   
+  sheet.getRange(newRowIdx, 1, 1, rowValues.length).setValues([rowValues]);
   return { success: true };
 }
 
-function findIdxInArray(array, keywords) {
-  for (var i = 0; i < array.length; i++) {
-    var item = array[i];
-    for (var k = 0; k < keywords.length; k++) {
-      if (item.indexOf(keywords[k]) !== -1) {
-        return i;
-      }
-    }
-  }
-  return -1;
-}
-
-function getColumnLetter(colIdx) {
-  if (colIdx <= 0) return null;
-  var letter = "";
-  while (colIdx > 0) {
-    var temp = (colIdx - 1) % 26;
-    letter = String.fromCharCode(65 + temp) + letter;
-    colIdx = (colIdx - temp - 1) / 26;
-  }
-  return letter;
-}
-
 function deleteTrade(tradeId) {
+  ensureTableStructure();
   var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Journal");
-  // tradeId is the actual spreadsheet row number (e.g. "2" = first data row after header).
-  // getDashboardData assigns id = (i + 1).toString() where i starts at 1,
-  // so the first data row (sheet row 2) gets id "2", not "1".
   var rowIdx = parseInt(tradeId);
   var lastRow = sheet.getLastRow();
   
-  // rowIdx must be > 1 (never delete header row 1) and within bounds
   if (rowIdx > 1 && rowIdx <= lastRow) {
     sheet.deleteRow(rowIdx);
     return { success: true, deletedRow: rowIdx };
   }
-  
   return { success: false, error: "Row index out of range: " + rowIdx + " (lastRow=" + lastRow + ")" };
 }
 
-// Helper to get or create the Portfolios config sheet
-function getOrCreatePortfoliosSheet() {
+function addPortfolio(name) {
+  ensureTableStructure();
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName("Portfolios");
-  if (!sheet) {
-    sheet = ss.insertSheet("Portfolios");
-    // Write headers
-    sheet.getRange(1, 1, 1, 3).setValues([["Asset Name", "Portfolio", "Portfolio Names"]]);
-    // Initialize default portfolios in column C
-    sheet.getRange(2, 3, 3, 1).setValues([["Main Trading"], ["BTC Stock"], ["Crypto"]]);
-  }
-  return sheet;
-}
-
-// Create a new portfolio custom name
-function addPortfolio(name) {
-  var sheet = getOrCreatePortfoliosSheet();
   var lastRow = sheet.getLastRow();
-  var values = sheet.getRange(1, 3, lastRow, 1).getValues();
   
-  // Check if it already exists
-  for (var i = 1; i < values.length; i++) {
-    if (values[i][0].toString().trim().toLowerCase() === name.toLowerCase()) {
+  var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  var headersLower = headers.map(function(h) { return h.toString().toLowerCase().trim(); });
+  var namesColIdx = headersLower.indexOf("portfolio names");
+  var capColIdx = headersLower.indexOf("initial capital");
+  var stocksColIdx = headersLower.indexOf("target stocks");
+  
+  if (namesColIdx === -1) return { success: false, error: "Portfolio Names column missing." };
+  
+  var nameValues = sheet.getRange(1, namesColIdx + 1, lastRow, 1).getValues();
+  for (var i = 1; i < nameValues.length; i++) {
+    if (nameValues[i][0].toString().trim().toLowerCase() === name.toLowerCase()) {
       return { success: true, message: "Portfolio already exists" };
     }
   }
   
-  // Find first empty cell in Column C or append
-  var targetRow = 2;
-  for (var i = 1; i < values.length; i++) {
-    if (values[i][0] === "") {
+  var targetRow = lastRow + 1;
+  for (var i = 1; i < nameValues.length; i++) {
+    if (nameValues[i][0] === "") {
       targetRow = i + 1;
       break;
     }
-    if (i === values.length - 1) {
-      targetRow = lastRow + 1;
-    }
   }
-  if (lastRow === 1) targetRow = 2;
   
-  sheet.getRange(targetRow, 3).setValue(name);
+  sheet.getRange(targetRow, namesColIdx + 1).setValue(name);
+  if (capColIdx !== -1) sheet.getRange(targetRow, capColIdx + 1).setValue(2000000.0);
+  if (stocksColIdx !== -1) sheet.getRange(targetRow, stocksColIdx + 1).setValue(50);
+  
   return { success: true };
 }
 
 function updatePortfolioConfig(name, initialCapital, targetStocks) {
-  var sheet = getOrCreatePortfoliosSheet();
+  ensureTableStructure();
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("Portfolios");
   var lastRow = sheet.getLastRow();
   
-  if (sheet.getLastColumn() < 5) {
-    sheet.getRange(1, 4, 1, 2).setValues([["Initial Capital", "Target Stocks"]]);
-  }
+  var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  var headersLower = headers.map(function(h) { return h.toString().toLowerCase().trim(); });
+  var namesColIdx = headersLower.indexOf("portfolio names");
+  var capColIdx = headersLower.indexOf("initial capital");
+  var stocksColIdx = headersLower.indexOf("target stocks");
   
-  var nameValues = sheet.getRange(1, 3, lastRow, 1).getValues();
+  if (namesColIdx === -1) return { success: false, error: "Portfolio Names column missing." };
+  
+  var nameValues = sheet.getRange(1, namesColIdx + 1, lastRow, 1).getValues();
   var found = false;
   for (var i = 1; i < nameValues.length; i++) {
     if (nameValues[i][0].toString().trim().toLowerCase() === name.toLowerCase()) {
-      sheet.getRange(i + 1, 4).setValue(initialCapital);
-      sheet.getRange(i + 1, 5).setValue(targetStocks);
+      var row = i + 1;
+      if (capColIdx !== -1) sheet.getRange(row, capColIdx + 1).setValue(initialCapital);
+      if (stocksColIdx !== -1) sheet.getRange(row, stocksColIdx + 1).setValue(targetStocks);
       found = true;
       break;
     }
@@ -537,98 +651,125 @@ function updatePortfolioConfig(name, initialCapital, targetStocks) {
   if (!found) {
     addPortfolio(name);
     var newLastRow = sheet.getLastRow();
-    sheet.getRange(newLastRow, 4).setValue(initialCapital);
-    sheet.getRange(newLastRow, 5).setValue(targetStocks);
+    if (capColIdx !== -1) sheet.getRange(newLastRow, capColIdx + 1).setValue(initialCapital);
+    if (stocksColIdx !== -1) sheet.getRange(newLastRow, stocksColIdx + 1).setValue(targetStocks);
   }
   
   return { success: true };
 }
 
-// Delete portfolio and all its asset mappings
 function deletePortfolio(portfolioName) {
-  var sheet = getOrCreatePortfoliosSheet();
+  ensureTableStructure();
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("Portfolios");
   var lastRow = sheet.getLastRow();
   
-  // 1. Remove from portfolio names list (column C)
-  var nameValues = sheet.getRange(1, 3, lastRow, 1).getValues();
-  for (var i = 1; i < nameValues.length; i++) {
-    if (nameValues[i][0].toString().trim().toLowerCase() === portfolioName.toLowerCase()) {
-      sheet.getRange(i + 1, 3).setValue(""); // clear the value
+  var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  var headersLower = headers.map(function(h) { return h.toString().toLowerCase().trim(); });
+  var namesColIdx = headersLower.indexOf("portfolio names");
+  
+  if (namesColIdx !== -1) {
+    var nameValues = sheet.getRange(1, namesColIdx + 1, lastRow, 1).getValues();
+    for (var i = 1; i < nameValues.length; i++) {
+      if (nameValues[i][0].toString().trim().toLowerCase() === portfolioName.toLowerCase()) {
+        sheet.getRange(i + 1, namesColIdx + 1).setValue(""); 
+        // Also clear configuration values
+        var capColIdx = headersLower.indexOf("initial capital");
+        var stocksColIdx = headersLower.indexOf("target stocks");
+        if (capColIdx !== -1) sheet.getRange(i + 1, capColIdx + 1).setValue("");
+        if (stocksColIdx !== -1) sheet.getRange(i + 1, stocksColIdx + 1).setValue("");
+      }
     }
   }
   
-  // 2. Remove mappings for assets assigned to this portfolio (columns A-B)
-  var mappingValues = sheet.getRange(1, 1, lastRow, 2).getValues();
-  // Delete rows from bottom up to avoid shifting index problems
-  for (var j = lastRow; j >= 2; j--) {
-    var mappedPort = mappingValues[j-1][1].toString().trim();
-    if (mappedPort.toLowerCase() === portfolioName.toLowerCase()) {
-      sheet.getRange(j, 1, 1, 2).clearContent();
+  var assetColIdx = headersLower.indexOf("asset name");
+  var portColIdx = headersLower.indexOf("portfolio");
+  if (assetColIdx !== -1 && portColIdx !== -1) {
+    var mappingValues = sheet.getRange(1, 1, lastRow, Math.max(assetColIdx, portColIdx) + 1).getValues();
+    for (var j = lastRow; j >= 2; j--) {
+      var mappedPort = mappingValues[j-1][portColIdx].toString().trim();
+      if (mappedPort.toLowerCase() === portfolioName.toLowerCase()) {
+        sheet.getRange(j, assetColIdx + 1).clearContent();
+        sheet.getRange(j, portColIdx + 1).clearContent();
+      }
     }
   }
   
   return { success: true };
 }
 
-// Rename a custom portfolio name and update all associated asset mappings
 function renamePortfolio(oldName, newName) {
-  var sheet = getOrCreatePortfoliosSheet();
+  ensureTableStructure();
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("Portfolios");
   var lastRow = sheet.getLastRow();
   
-  // 1. Update in portfolio names list (column C)
-  var nameValues = sheet.getRange(1, 3, lastRow, 1).getValues();
-  for (var i = 1; i < nameValues.length; i++) {
-    if (nameValues[i][0].toString().trim().toLowerCase() === oldName.toLowerCase()) {
-      sheet.getRange(i + 1, 3).setValue(newName);
+  var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  var headersLower = headers.map(function(h) { return h.toString().toLowerCase().trim(); });
+  var namesColIdx = headersLower.indexOf("portfolio names");
+  
+  if (namesColIdx !== -1) {
+    var nameValues = sheet.getRange(1, namesColIdx + 1, lastRow, 1).getValues();
+    for (var i = 1; i < nameValues.length; i++) {
+      if (nameValues[i][0].toString().trim().toLowerCase() === oldName.toLowerCase()) {
+        sheet.getRange(i + 1, namesColIdx + 1).setValue(newName);
+      }
     }
   }
   
-  // 2. Update mappings (columns A-B)
-  var mappingValues = sheet.getRange(1, 1, lastRow, 2).getValues();
-  for (var j = 2; j <= lastRow; j++) {
-    var mappedPort = mappingValues[j-1][1].toString().trim();
-    if (mappedPort.toLowerCase() === oldName.toLowerCase()) {
-      sheet.getRange(j, 2).setValue(newName);
+  var portColIdx = headersLower.indexOf("portfolio");
+  if (portColIdx !== -1) {
+    var portValues = sheet.getRange(1, portColIdx + 1, lastRow, 1).getValues();
+    for (var j = 2; j <= lastRow; j++) {
+      var mappedPort = portValues[j-1][0].toString().trim();
+      if (mappedPort.toLowerCase() === oldName.toLowerCase()) {
+        sheet.getRange(j, portColIdx + 1).setValue(newName);
+      }
     }
   }
   
   return { success: true };
 }
 
-// Map asset to portfolio and ensure portfolio name is defined
 function transferPosition(assetName, targetPortfolio) {
-  var sheet = getOrCreatePortfoliosSheet();
+  ensureTableStructure();
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("Portfolios");
   var lastRow = sheet.getLastRow();
   
-  var mappingValues = sheet.getRange(1, 1, lastRow, 2).getValues();
+  var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  var headersLower = headers.map(function(h) { return h.toString().toLowerCase().trim(); });
+  var assetColIdx = headersLower.indexOf("asset name");
+  var portColIdx = headersLower.indexOf("portfolio");
+  
+  if (assetColIdx === -1 || portColIdx === -1) {
+    return { success: false, error: "Asset mappings columns missing." };
+  }
+  
+  var mappingValues = sheet.getRange(1, 1, lastRow, Math.max(assetColIdx, portColIdx) + 1).getValues();
   var found = false;
   
-  // Look for existing asset mapping
   for (var i = 1; i < mappingValues.length; i++) {
-    if (mappingValues[i][0].toString().trim().toUpperCase() === assetName.toUpperCase()) {
-      sheet.getRange(i + 1, 2).setValue(targetPortfolio);
+    if (mappingValues[i][assetColIdx].toString().trim().toUpperCase() === assetName.toUpperCase()) {
+      sheet.getRange(i + 1, portColIdx + 1).setValue(targetPortfolio);
       found = true;
       break;
     }
   }
   
-  // If not found, find an empty row in Columns A-B, or append
   if (!found) {
     var targetRow = lastRow + 1;
     for (var i = 1; i < mappingValues.length; i++) {
-      if (mappingValues[i][0] === "" && mappingValues[i][1] === "") {
+      if (mappingValues[i][assetColIdx] === "" && mappingValues[i][portColIdx] === "") {
         targetRow = i + 1;
         break;
       }
     }
-    if (lastRow === 1) targetRow = 2;
-    sheet.getRange(targetRow, 1).setValue(assetName.toUpperCase());
-    sheet.getRange(targetRow, 2).setValue(targetPortfolio);
+    sheet.getRange(targetRow, assetColIdx + 1).setValue(assetName.toUpperCase());
+    sheet.getRange(targetRow, portColIdx + 1).setValue(targetPortfolio);
   }
   
-  // Also ensure target portfolio name is in Column C
   addPortfolio(targetPortfolio);
-  
   return { success: true };
 }
 
@@ -638,7 +779,6 @@ function validateTicker(symbol, assetType) {
     return { valid: false, message: "Ticker symbol cannot be empty." };
   }
   
-  // Resolve ticker symbol
   var resolvedSymbol = symbolStripped;
   var tickerMap = {
     "BJC": "BJC.BK",
@@ -651,36 +791,34 @@ function validateTicker(symbol, assetType) {
   if (tickerMap[resolvedSymbol]) {
     resolvedSymbol = tickerMap[resolvedSymbol];
   } else {
-    if (assetType.toLowerCase() === "thai stock" && !resolvedSymbol.endsWith(".BK")) {
+    var assetLower = (assetType || "").toLowerCase().trim();
+    if (assetLower === "thai stock" && !resolvedSymbol.endsWith(".BK")) {
       resolvedSymbol = resolvedSymbol + ".BK";
-    } else if (assetType.toLowerCase() === "crypto" && resolvedSymbol.indexOf("-") === -1) {
+    } else if (assetLower === "crypto" && resolvedSymbol.indexOf("-") === -1) {
       resolvedSymbol = resolvedSymbol + "-USD";
     }
   }
   
   try {
-    var price = fetchRateFromYahoo(resolvedSymbol);
+    var response = UrlFetchApp.fetch("https://query1.finance.yahoo.com/v8/finance/chart/" + resolvedSymbol, { muteHttpExceptions: true });
+    var json = JSON.parse(response.getContentText());
+    var price = json.chart.result[0].meta.regularMarketPrice;
     if (price !== null && price !== undefined && !isNaN(price)) {
       return {
         valid: true,
         ticker: resolvedSymbol,
-        message: "Ticker '" + resolvedSymbol + "' is verified on Yahoo Finance. Live Price: " + price
+        message: "Ticker '" + resolvedSymbol + "' verified. Live Price: " + price
       };
     } else {
-      return {
-        valid: false,
-        message: "Ticker '" + resolvedSymbol + "' not found or has no price data on Yahoo Finance."
-      };
+      return { valid: false, message: "No price data found for '" + resolvedSymbol + "' on Yahoo Finance." };
     }
   } catch (e) {
-    return {
-      valid: false,
-      message: "Error verifying ticker '" + resolvedSymbol + "': " + e.toString()
-    };
+    return { valid: false, message: "Error verifying ticker '" + resolvedSymbol + "': " + e.toString() };
   }
 }
 
 function updateTradeStrategy(tradeId, why, remark) {
+  ensureTableStructure();
   var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Journal");
   var rowIdx = parseInt(tradeId);
   var lastRow = sheet.getLastRow();
@@ -689,8 +827,11 @@ function updateTradeStrategy(tradeId, why, remark) {
     var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
     var headersLower = headers.map(function(h) { return h.toString().toLowerCase().trim(); });
     
-    var whyIdx = findIdxInArray(headersLower, ["why", "decision", "reason"]);
-    var remarkIdx = findIdxInArray(headersLower, ["remark", "note"]);
+    var whyIdx = headersLower.indexOf("why (decision reason)");
+    if (whyIdx === -1) whyIdx = headersLower.indexOf("why");
+    
+    var remarkIdx = headersLower.indexOf("remark");
+    if (remarkIdx === -1) remarkIdx = headersLower.indexOf("note");
     
     if (whyIdx !== -1) {
       sheet.getRange(rowIdx, whyIdx + 1).setValue(why);
@@ -700,11 +841,11 @@ function updateTradeStrategy(tradeId, why, remark) {
     }
     return { success: true };
   }
-  
-  return { success: false, error: "Row index out of range: " + rowIdx + " (lastRow=" + lastRow + ")" };
+  return { success: false, error: "Row index out of bounds." };
 }
 
 function updateTradePortfolio(tradeId, targetPortfolio) {
+  ensureTableStructure();
   var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Journal");
   var rowIdx = parseInt(tradeId);
   var lastRow = sheet.getLastRow();
@@ -713,18 +854,17 @@ function updateTradePortfolio(tradeId, targetPortfolio) {
     var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
     var headersLower = headers.map(function(h) { return h.toString().toLowerCase().trim(); });
     
-    var portIdx = findIdxInArray(headersLower, ["portfolio", "port"]);
+    var portIdx = headersLower.indexOf("portfolio");
+    if (portIdx === -1) portIdx = headersLower.indexOf("port");
+    
     if (portIdx !== -1) {
       sheet.getRange(rowIdx, portIdx + 1).setValue(targetPortfolio);
     } else {
-      // If Portfolio column doesn't exist, create it dynamically
       var newCol = sheet.getLastColumn() + 1;
       sheet.getRange(1, newCol).setValue("Portfolio");
       sheet.getRange(rowIdx, newCol).setValue(targetPortfolio);
     }
     return { success: true };
   }
-  
-  return { success: false, error: "Row index out of range: " + rowIdx + " (lastRow=" + lastRow + ")" };
+  return { success: false, error: "Row index out of bounds." };
 }
-```
