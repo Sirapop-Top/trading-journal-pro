@@ -658,14 +658,80 @@ function addTrade(trade) {
 function deleteTrade(tradeId) {
   ensureTableStructure();
   var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Journal");
-  var rowIdx = parseInt(tradeId);
   var lastRow = sheet.getLastRow();
   
-  if (rowIdx > 1 && rowIdx <= lastRow) {
-    sheet.deleteRow(rowIdx);
-    return { success: true, deletedRow: rowIdx };
+  var idStr = tradeId.toString().trim();
+  if (idStr.indexOf("sig-") === 0) {
+    // Locate row by composite signature
+    var rows = sheet.getDataRange().getValues();
+    if (rows.length <= 1) {
+      return { success: false, error: "Journal is empty." };
+    }
+    
+    var headers = rows[0].map(function(h) { return h.toString().toLowerCase().trim(); });
+    function findColIdx(keywords) {
+      for (var i = 0; i < headers.length; i++) {
+        var h = headers[i];
+        for (var k = 0; k < keywords.length; k++) {
+          if (h.indexOf(keywords[k]) !== -1) return i;
+        }
+      }
+      return -1;
+    }
+    
+    var dateIdx = findColIdx(["date"]);
+    var assetNameIdx = findColIdx(["asset name", "asset_name", "asset"]);
+    var actionIdx = findColIdx(["action"]);
+    var quantityIdx = findColIdx(["quantity", "qty"]);
+    var priceUnitIdx = findColIdx(["price/unit", "price_unit", "price unit", "price"]);
+    var tsIdx = findColIdx(["timestamp"]);
+    
+    for (var i = 1; i < rows.length; i++) {
+      var row = rows[i];
+      
+      // Match by written timestamp signature first
+      var tsVal = tsIdx !== -1 ? row[tsIdx].toString().trim() : "";
+      if (tsVal === idStr) {
+        sheet.deleteRow(i + 1);
+        return { success: true, deletedRow: i + 1, method: "timestamp" };
+      }
+      
+      // Fallback: reconstruct signature
+      try {
+        var assetName = assetNameIdx !== -1 ? row[assetNameIdx].toString().trim().toUpperCase() : "";
+        var action = actionIdx !== -1 ? row[actionIdx].toString().trim() : "Buy";
+        action = action.charAt(0).toUpperCase() + action.slice(1).toLowerCase();
+        
+        var qty = quantityIdx !== -1 ? parseFloat(row[quantityIdx]) : 0.0;
+        var price = priceUnitIdx !== -1 ? parseFloat(row[priceUnitIdx]) : 0.0;
+        
+        var dateVal = "";
+        if (dateIdx !== -1 && row[dateIdx]) {
+          var d = row[dateIdx];
+          if (d instanceof Date) {
+            dateVal = Utilities.formatDate(d, Session.getScriptTimeZone(), "yyyy-MM-dd");
+          } else {
+            dateVal = d.toString().split(" ")[0].trim();
+          }
+        }
+        
+        var rowSig = ("sig-" + dateVal + "-" + assetName + "-" + action + "-" + qty + "-" + price).trim();
+        if (rowSig === idStr) {
+          sheet.deleteRow(i + 1);
+          return { success: true, deletedRow: i + 1, method: "reconstructed_signature" };
+        }
+      } catch (e) {}
+    }
+    return { success: false, error: "Trade signature not found: " + idStr };
+  } else {
+    // Locate row by direct row index (Cloud Mode deletes)
+    var rowIdx = parseInt(tradeId);
+    if (rowIdx > 1 && rowIdx <= lastRow) {
+      sheet.deleteRow(rowIdx);
+      return { success: true, deletedRow: rowIdx, method: "row_index" };
+    }
+    return { success: false, error: "Row index out of range: " + rowIdx + " (lastRow=" + lastRow + ")" };
   }
-  return { success: false, error: "Row index out of range: " + rowIdx + " (lastRow=" + lastRow + ")" };
 }
 
 function addPortfolio(name) {

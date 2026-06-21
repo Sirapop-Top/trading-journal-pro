@@ -625,3 +625,20 @@ In Cloud Mode (Google Sheets), the trades list is fetched directly from the shee
 **Files Changed:**
 - `github_sheets_serverless_deployment_guide.md`
 - `system_blueprint.md`
+
+---
+
+### [2026-06-21] — Fix: Google Sheets Transaction Deletion Synchronization in Local Mode
+
+**Fixes Applied:**
+1. **Local Mode Deletion Sync:**
+   - Modified `@app.delete("/api/trades/{trade_id}")` in `backend/main.py` to identify the trade target, compile its composite signature (`sig-{date}-{asset}-{action}-{qty}-{price}`), and send a `deleteTrade` POST request to the Google Apps Script Web App.
+   - Cleans up the `synced_google_form_timestamps` cache upon trade deletion to avoid stale cache references.
+2. **Flexible Apps Script Deletion Resolver:**
+   - Updated the Google Apps Script `deleteTrade` implementation in `github_sheets_serverless_deployment_guide.md` to accept either direct row numbers (used by the serverless client-side mode) or composite trade signatures (used by the local Excel sync engine).
+   - Locates target rows by searching either for the signature in the `Timestamp` column or reconstructed from row cells, then performs the deletion.
+
+**Files Changed:**
+- `backend/main.py`
+- `github_sheets_serverless_deployment_guide.md`
+- `system_blueprint.md`

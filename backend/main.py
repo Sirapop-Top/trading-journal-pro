@@ -539,17 +539,54 @@ def delete_trade(trade_id: str):
     db_data = load_db()
     trades = db_data.get("trades", [])
     
-    filtered_trades = [t for t in trades if t["id"] != trade_id]
-    if len(filtered_trades) == len(trades):
+    found_trade = None
+    for t in trades:
+        if t["id"] == trade_id:
+            found_trade = t
+            break
+            
+    if not found_trade:
         raise HTTPException(status_code=404, detail="Trade not found")
         
-    db_data["trades"] = filtered_trades
-    save_db(db_data)
+    # Construct trade signature for sync deletion
+    date_val = found_trade.get("date", "")
+    asset_val = found_trade.get("assetName", "")
+    action_val = found_trade.get("action", "")
+    qty_val = found_trade.get("quantity", 0)
+    price_val = found_trade.get("priceUnit", 0)
+    sig = f"sig-{date_val}-{asset_val}-{action_val}-{qty_val}-{price_val}".strip()
     
-    # Re-save to Excel to sync the deletion (or just update db.json)
-    # Since Excel sheet is a historical log, syncing deletion might be optional, 
-    # but let's update Excel too by rewriting the sheet or just keeping db.json in sync.
-    # For now, updating db.json is enough, but let's try to overwrite Excel if it exists to keep them in sync.
+    # Sync deletion with Google Sheets if script URL is configured
+    apps_script_url = db_data.get("google_apps_script_url")
+    if apps_script_url:
+        print(f"[Google Sheet Sync] Deleting trade from Google Sheet: {asset_val} ({sig})")
+        payload = {
+            "action": "deleteTrade",
+            "tradeId": sig
+        }
+        try:
+            import requests
+            resp = requests.post(apps_script_url, json=payload, timeout=10)
+            if resp.status_code == 200:
+                print(f"[Google Sheet Sync] Successfully sent delete request for {sig}")
+            else:
+                print(f"[Google Sheet Sync] Sheet delete request returned HTTP {resp.status_code}")
+        except Exception as e:
+            print(f"[Google Sheet Sync] Error calling deleteTrade on Apps Script: {e}")
+            
+    # Remove from local database and cache
+    filtered_trades = [t for t in trades if t["id"] != trade_id]
+    db_data["trades"] = filtered_trades
+    
+    synced_timestamps = db_data.get("synced_google_form_timestamps", [])
+    if sig in synced_timestamps:
+        try:
+            synced_timestamps.remove(sig)
+            db_data["synced_google_form_timestamps"] = synced_timestamps
+        except Exception:
+            pass
+            
+    save_db(db_data)
     rewrite_excel_from_db(filtered_trades)
     
     return {"message": "Trade deleted successfully"}
