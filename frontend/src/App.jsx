@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { 
   Layout, Menu, Button, Card, Statistic, Table, Modal, 
   Form, Input, InputNumber, Select, DatePicker, Row, Col, Space, 
-  Spin, Tag, Typography, Popconfirm, message, Alert, Switch, ConfigProvider, theme, Checkbox
+  Spin, Tag, Typography, Popconfirm, message, Alert, Switch, ConfigProvider, theme, Checkbox, Progress
 } from 'antd';
 import { 
   DashboardOutlined, 
@@ -1054,15 +1054,17 @@ function App() {
     const cashOnHand = initialCapital - totalInvested + totalRealizedPnL;
     const positionSizeBalance = targetStocks > 0 ? (initialCapital + totalRealizedPnL) / targetStocks : 0;
     const positionSizeCash = targetStocks > 0 ? (cashOnHand + totalRealizedPnL) / targetStocks : 0;
+    const activeHoldingsCount = positions.filter(pos => pos.qtyHeld > 0).length;
     
     return {
       initialCapital,
       targetStocks,
       cashOnHand,
       positionSizeBalance,
-      positionSizeCash
+      positionSizeCash,
+      activeHoldingsCount
     };
-  }, [portfolios, activePortfolio, kpis]);
+  }, [portfolios, activePortfolio, kpis, positions]);
 
   // ----------------------------------------------------
   // Chart Visual Data Transformations
@@ -2521,6 +2523,12 @@ function App() {
     );
   }
 
+  const netAssetValue = (portfolioSizing?.cashOnHand || 0) + (kpis?.currentMarketValueConverted || 0);
+  const netProfit = netAssetValue - (portfolioSizing?.initialCapital || 0);
+  const netProfitPct = (portfolioSizing?.initialCapital || 0) > 0 ? (netProfit / portfolioSizing.initialCapital) * 100 : 0;
+  const investedPct = netAssetValue > 0 ? Math.min(100, ((kpis?.currentMarketValueConverted || 0) / netAssetValue) * 100) : 0;
+  const cashPct = 100 - investedPct;
+
   return (
     <ConfigProvider
       theme={{
@@ -2817,63 +2825,47 @@ function App() {
               {/* 1. DASHBOARD PAGE - MOBILE */}
               {activeTab === 'dashboard' && isMobile && (
                 <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-                  {/* Compact KPIs in a 2x2 Grid */}
-                  <Row gutter={[12, 12]}>
-                    <Col span={12}>
-                      <Card bordered={false} className="glass-panel glow-card-cyan" styles={{ body: { padding: '12px' } }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <span style={{ fontSize: '9px', color: 'var(--text-secondary)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                            Invested
-                          </span>
-                          <WalletOutlined style={{ color: 'var(--primary-color)', fontSize: '13px' }} />
+                  
+                  {/* Mobile Account Summary (NAV Hero) */}
+                  <Card bordered={false} className="glass-panel glow-card-cyan" styles={{ body: { padding: '16px' } }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div>
+                        <span style={{ fontSize: '9px', color: 'var(--text-secondary)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.8px' }}>
+                          Net Asset Value (NAV)
+                        </span>
+                        <div style={{ fontSize: '22px', fontWeight: 800, color: '#ffffff', marginTop: '2px', fontFamily: 'var(--font-family-mono)' }}>
+                          {formatCurrency(netAssetValue)}
                         </div>
-                        <div style={{ fontSize: '16px', fontWeight: 700, color: '#ffffff', marginTop: '6px', fontFamily: 'var(--font-family-mono)' }}>
-                          {formatCurrency(kpis.totalInvestedConverted)}
-                        </div>
-                      </Card>
-                    </Col>
-                    
-                    <Col span={12}>
-                      <Card bordered={false} className="glass-panel glow-card-cyan" styles={{ body: { padding: '12px' } }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <span style={{ fontSize: '9px', color: 'var(--text-secondary)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                            Value
-                          </span>
-                          <GlobalOutlined style={{ color: 'var(--primary-color)', fontSize: '13px' }} />
-                        </div>
-                        <div style={{ fontSize: '16px', fontWeight: 700, color: '#ffffff', marginTop: '6px', fontFamily: 'var(--font-family-mono)' }}>
-                          {formatCurrency(kpis.currentMarketValueConverted)}
-                        </div>
-                      </Card>
-                    </Col>
+                      </div>
+                      <span style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        padding: '2px 6px',
+                        borderRadius: '4px',
+                        fontSize: '10px',
+                        fontWeight: 'bold',
+                        background: netProfit >= 0 ? 'rgba(16, 185, 129, 0.15)' : 'rgba(244, 63, 94, 0.15)',
+                        color: netProfit >= 0 ? 'var(--success-color)' : 'var(--danger-color)'
+                      }}>
+                        {netProfit >= 0 ? '▲' : '▼'} {netProfitPct.toFixed(1)}%
+                      </span>
+                    </div>
 
-                    <Col span={12}>
-                      <Card 
-                        bordered={false} 
-                        className={`glass-panel ${kpis.totalRealizedPnLConverted >= 0 ? 'glow-card-green' : 'glow-card-red'}`}
-                        styles={{ body: { padding: '12px' } }}
-                      >
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <span style={{ fontSize: '9px', color: 'var(--text-secondary)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                            Realized
-                          </span>
-                          {kpis.totalRealizedPnLConverted >= 0 
-                            ? <RiseOutlined style={{ color: 'var(--success-color)', fontSize: '13px' }} /> 
-                            : <FallOutlined style={{ color: 'var(--danger-color)', fontSize: '13px' }} />
-                          }
-                        </div>
-                        <div style={{ 
-                          fontSize: '16px', 
-                          fontWeight: 700, 
-                          color: kpis.totalRealizedPnLConverted >= 0 ? 'var(--success-color)' : 'var(--danger-color)', 
-                          marginTop: '6px', 
-                          fontFamily: 'var(--font-family-mono)' 
-                        }}>
-                          {kpis.totalRealizedPnLConverted >= 0 ? '+' : ''}{formatCurrency(kpis.totalRealizedPnLConverted)}
-                        </div>
-                      </Card>
-                    </Col>
+                    {/* Capital utilization bar */}
+                    <div style={{ marginTop: '12px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '9px', marginBottom: '4px', color: 'var(--text-secondary)' }}>
+                        <span>Exposure: <strong>{investedPct.toFixed(0)}%</strong></span>
+                        <span>Cash: <strong>{cashPct.toFixed(0)}%</strong></span>
+                      </div>
+                      <div style={{ width: '100%', height: '6px', background: 'rgba(255,255,255,0.06)', borderRadius: '3px', overflow: 'hidden', display: 'flex' }}>
+                        <div style={{ width: `${investedPct}%`, height: '100%', background: 'linear-gradient(90deg, #00f2fe 0%, #4facfe 100%)' }} />
+                        <div style={{ width: `${cashPct}%`, height: '100%', background: 'linear-gradient(90deg, #10b981 0%, #059669 100%)' }} />
+                      </div>
+                    </div>
+                  </Card>
 
+                  {/* 2x2 Grid of Key Financials */}
+                  <Row gutter={[10, 10]}>
                     <Col span={12}>
                       <Card 
                         bordered={false} 
@@ -2881,56 +2873,29 @@ function App() {
                         styles={{ body: { padding: '12px' } }}
                       >
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <span style={{ fontSize: '9px', color: 'var(--text-secondary)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                            Return
+                          <span style={{ fontSize: '9px', color: 'var(--text-secondary)', fontWeight: 700, textTransform: 'uppercase' }}>
+                            Total Return
                           </span>
-                          <span style={{
-                            fontSize: '9px',
-                            fontWeight: 'bold',
-                            color: kpis.totalPnLConverted >= 0 ? 'var(--success-color)' : 'var(--danger-color)'
-                          }}>
-                            {kpis.totalPnLConverted >= 0 ? '▲' : '▼'} {kpis.totalPnLPct.toFixed(1)}%
+                          <span style={{ fontSize: '9px', fontWeight: 'bold', color: kpis.totalPnLConverted >= 0 ? 'var(--success-color)' : 'var(--danger-color)' }}>
+                            {kpis.totalPnLPct.toFixed(1)}%
                           </span>
                         </div>
-                        <div style={{ 
-                          fontSize: '16px', 
-                          fontWeight: 700, 
-                          color: kpis.totalPnLConverted >= 0 ? 'var(--success-color)' : 'var(--danger-color)', 
-                          marginTop: '6px', 
-                          fontFamily: 'var(--font-family-mono)' 
-                        }}>
+                        <div style={{ fontSize: '15px', fontWeight: 700, color: kpis.totalPnLConverted >= 0 ? 'var(--success-color)' : 'var(--danger-color)', marginTop: '4px', fontFamily: 'var(--font-family-mono)' }}>
                           {kpis.totalPnLConverted >= 0 ? '+' : ''}{formatCurrency(kpis.totalPnLConverted)}
                         </div>
                       </Card>
                     </Col>
-                  </Row>
 
-                  {/* Compact Portfolio Capital & Sizing in a 2x2 Grid for Mobile */}
-                  <Row gutter={[12, 12]} style={{ marginTop: '12px' }}>
                     <Col span={12}>
                       <Card bordered={false} className="glass-panel glow-card-cyan" styles={{ body: { padding: '12px' } }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <span style={{ fontSize: '9px', color: 'var(--text-secondary)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                            Capital
+                          <span style={{ fontSize: '9px', color: 'var(--text-secondary)', fontWeight: 700, textTransform: 'uppercase' }}>
+                            Realized P&L
                           </span>
-                          <BankOutlined style={{ color: 'var(--primary-color)', fontSize: '13px' }} />
+                          <RiseOutlined style={{ color: 'var(--success-color)', fontSize: '11px' }} />
                         </div>
-                        <div style={{ fontSize: '16px', fontWeight: 700, color: '#ffffff', marginTop: '6px', fontFamily: 'var(--font-family-mono)' }}>
-                          {formatCurrency(portfolioSizing.initialCapital)}
-                        </div>
-                      </Card>
-                    </Col>
-                    
-                    <Col span={12}>
-                      <Card bordered={false} className="glass-panel glow-card-cyan" styles={{ body: { padding: '12px' } }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <span style={{ fontSize: '9px', color: 'var(--text-secondary)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                            Target Hold
-                          </span>
-                          <PieChartOutlined style={{ color: 'var(--primary-color)', fontSize: '13px' }} />
-                        </div>
-                        <div style={{ fontSize: '16px', fontWeight: 700, color: '#ffffff', marginTop: '6px', fontFamily: 'var(--font-family-mono)' }}>
-                          {portfolioSizing.targetStocks} stocks
+                        <div style={{ fontSize: '15px', fontWeight: 700, color: kpis.totalRealizedPnLConverted >= 0 ? 'var(--success-color)' : 'var(--danger-color)', marginTop: '4px', fontFamily: 'var(--font-family-mono)' }}>
+                          {formatCurrency(kpis.totalRealizedPnLConverted)}
                         </div>
                       </Card>
                     </Col>
@@ -2938,34 +2903,67 @@ function App() {
                     <Col span={12}>
                       <Card bordered={false} className="glass-panel glow-card-cyan" styles={{ body: { padding: '12px' } }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <span style={{ fontSize: '9px', color: 'var(--text-secondary)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                            Cash on Hand
+                          <span style={{ fontSize: '9px', color: 'var(--text-secondary)', fontWeight: 700, textTransform: 'uppercase' }}>
+                            Live Valuation
                           </span>
-                          <DollarOutlined style={{ color: 'var(--primary-color)', fontSize: '13px' }} />
+                          <GlobalOutlined style={{ color: 'var(--primary-color)', fontSize: '11px' }} />
                         </div>
-                        <div style={{ fontSize: '16px', fontWeight: 700, color: '#ffffff', marginTop: '6px', fontFamily: 'var(--font-family-mono)' }}>
+                        <div style={{ fontSize: '15px', fontWeight: 700, color: '#ffffff', marginTop: '4px', fontFamily: 'var(--font-family-mono)' }}>
+                          {formatCurrency(kpis.currentMarketValueConverted)}
+                        </div>
+                      </Card>
+                    </Col>
+
+                    <Col span={12}>
+                      <Card bordered={false} className="glass-panel glow-card-cyan" styles={{ body: { padding: '12px' } }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <span style={{ fontSize: '9px', color: 'var(--text-secondary)', fontWeight: 700, textTransform: 'uppercase' }}>
+                            Cash Power
+                          </span>
+                          <DollarOutlined style={{ color: 'var(--success-color)', fontSize: '11px' }} />
+                        </div>
+                        <div style={{ fontSize: '15px', fontWeight: 700, color: '#ffffff', marginTop: '4px', fontFamily: 'var(--font-family-mono)' }}>
                           {formatCurrency(portfolioSizing.cashOnHand)}
                         </div>
                       </Card>
                     </Col>
-
-                    <Col span={12}>
-                      <Card bordered={false} className="glass-panel glow-card-cyan" styles={{ body: { padding: '12px' } }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <span style={{ fontSize: '9px', color: 'var(--text-secondary)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                            Pos. Size / Trade
-                          </span>
-                          <SlidersOutlined style={{ color: 'var(--primary-color)', fontSize: '13px' }} />
-                        </div>
-                        <div style={{ fontSize: '16px', fontWeight: 700, color: '#ffffff', marginTop: '6px', fontFamily: 'var(--font-family-mono)' }}>
-                          {formatCurrency(portfolioSizing.positionSizeCash)}
-                        </div>
-                        <div style={{ fontSize: '9px', color: 'var(--text-secondary)', marginTop: '2px' }}>
-                          Bal. basis: {formatCurrency(portfolioSizing.positionSizeBalance)}
-                        </div>
-                      </Card>
-                    </Col>
                   </Row>
+
+                  {/* Sizing & Allocation Blueprint Card for Mobile */}
+                  <Card bordered={false} className="glass-panel" styles={{ body: { padding: '14px' } }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                      <span style={{ fontSize: '10px', color: 'var(--text-secondary)', fontWeight: 700, textTransform: 'uppercase' }}>
+                        Blueprint & Risk Management
+                      </span>
+                      <PieChartOutlined style={{ color: 'var(--primary-color)', fontSize: '12px' }} />
+                    </div>
+                    
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '4px' }}>
+                      <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>Holdings Slots:</span>
+                      <strong style={{ color: '#ffffff', fontSize: '14px', fontFamily: 'var(--font-family-mono)' }}>
+                        {portfolioSizing.activeHoldingsCount} / {portfolioSizing.targetStocks} stocks
+                      </strong>
+                    </div>
+
+                    <div style={{ width: '100%', height: '4px', background: 'rgba(255,255,255,0.06)', borderRadius: '2px', overflow: 'hidden', marginBottom: '12px' }}>
+                      <div style={{ 
+                        width: `${Math.min(100, (portfolioSizing.activeHoldingsCount / (portfolioSizing.targetStocks || 1)) * 100)}%`, 
+                        height: '100%', 
+                        background: 'var(--primary-color)' 
+                      }} />
+                    </div>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', borderTop: '1px solid rgba(255,255,255,0.04)', paddingTop: '10px' }}>
+                      <div>
+                        <span style={{ fontSize: '8px', color: 'var(--text-muted)', textTransform: 'uppercase', display: 'block' }}>Initial Capital</span>
+                        <strong style={{ fontSize: '12px', color: '#ffffff', fontFamily: 'var(--font-family-mono)' }}>{formatCurrency(portfolioSizing.initialCapital)}</strong>
+                      </div>
+                      <div>
+                        <span style={{ fontSize: '8px', color: 'var(--text-muted)', textTransform: 'uppercase', display: 'block' }}>Target Pos. Size</span>
+                        <strong style={{ fontSize: '12px', color: 'var(--primary-color)', fontFamily: 'var(--font-family-mono)' }}>{formatCurrency(portfolioSizing.positionSizeCash)}</strong>
+                      </div>
+                    </div>
+                  </Card>
 
                   {/* Chart Selector Horizontal Pills for Mobile */}
                   <div className="mobile-pill-container">
@@ -3051,37 +3049,61 @@ function App() {
                   )}
 
                   {mobileChartTab === 'analytics' && (
-                    <Card title="📊 Trading Analytics" bordered={false}>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', padding: '6px 0' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '8px' }}>
-                          <span style={{ color: 'var(--text-secondary)', fontSize: '13px' }}>Total Trades</span>
-                          <strong style={{ color: '#ffffff', fontSize: '13px' }} className="financial-num">{tradingAnalytics.totalTrades} ({tradingAnalytics.buysCount} B / {tradingAnalytics.sellsCount} S)</strong>
+                    <Card title="📊 Trading Performance" bordered={false} className="glass-panel">
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '10px 0', borderBottom: '1px solid rgba(255,255,255,0.05)', marginBottom: '12px' }}>
+                        <Progress
+                          type="circle"
+                          percent={Number(tradingAnalytics.winRate.toFixed(1))}
+                          strokeWidth={8}
+                          width={90}
+                          strokeColor={{
+                            '0%': 'var(--danger-color)',
+                            '50%': 'rgba(245, 158, 11, 0.8)',
+                            '100%': 'var(--success-color)',
+                          }}
+                          trailColor="rgba(255,255,255,0.05)"
+                          format={(pct) => (
+                            <div style={{ color: '#ffffff' }}>
+                              <div style={{ fontSize: '16px', fontWeight: 800, fontFamily: 'var(--font-family-mono)' }}>{pct}%</div>
+                              <div style={{ fontSize: '8px', color: 'var(--text-secondary)', textTransform: 'uppercase', fontWeight: 600 }}>Win Rate</div>
+                            </div>
+                          )}
+                        />
+                        <div style={{ display: 'flex', gap: '12px', marginTop: '10px', fontSize: '11px' }}>
+                          <span style={{ color: 'var(--success-color)', fontWeight: 600 }}>{tradingAnalytics.winCount}W</span>
+                          <span style={{ color: 'var(--text-muted)' }}>|</span>
+                          <span style={{ color: 'var(--danger-color)', fontWeight: 600 }}>{tradingAnalytics.lossCount}L</span>
+                          <span style={{ color: 'var(--text-muted)' }}>|</span>
+                          <span style={{ color: '#ffffff' }}>{tradingAnalytics.totalClosedTrades} Closed</span>
                         </div>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '8px' }}>
-                          <span style={{ color: 'var(--text-secondary)', fontSize: '13px' }}>Win Rate</span>
-                          <strong style={{ color: tradingAnalytics.winRate >= 50 ? 'var(--success-color)' : 'var(--danger-color)', fontSize: '13px' }} className="financial-num">{tradingAnalytics.winRate.toFixed(1)}% ({tradingAnalytics.winCount}W / {tradingAnalytics.lossCount}L)</strong>
+                      </div>
+
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.04)', paddingBottom: '6px' }}>
+                          <span style={{ color: 'var(--text-secondary)', fontSize: '12px' }}>Total Actions</span>
+                          <strong style={{ color: '#ffffff', fontSize: '12px' }} className="financial-num">{tradingAnalytics.totalTrades} ({tradingAnalytics.buysCount} B / {tradingAnalytics.sellsCount} S)</strong>
                         </div>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '8px' }}>
-                          <span style={{ color: 'var(--text-secondary)', fontSize: '13px' }}>Profit Factor</span>
-                          <strong style={{ color: tradingAnalytics.winRate >= 50 ? 'var(--success-color)' : 'var(--danger-color)', fontSize: '13px' }} className="financial-num">
+                        <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.04)', paddingBottom: '6px' }}>
+                          <span style={{ color: 'var(--text-secondary)', fontSize: '12px' }}>Profit Factor</span>
+                          <strong style={{ color: tradingAnalytics.profitFactor >= 1.5 ? 'var(--success-color)' : (tradingAnalytics.profitFactor >= 1.0 ? '#f59e0b' : 'var(--danger-color)'), fontSize: '12px' }} className="financial-num">
                             {tradingAnalytics.profitFactor === Infinity ? '∞' : tradingAnalytics.profitFactor.toFixed(2)}
                           </strong>
                         </div>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '8px' }}>
-                          <span style={{ color: 'var(--text-secondary)', fontSize: '13px' }}>Risk-Reward</span>
-                          <strong style={{ color: '#ffffff', fontSize: '13px' }} className="financial-num">1 : {tradingAnalytics.riskRewardRatio.toFixed(2)}</strong>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.04)', paddingBottom: '6px' }}>
+                          <span style={{ color: 'var(--text-secondary)', fontSize: '12px' }}>Risk-Reward</span>
+                          <strong style={{ color: '#ffffff', fontSize: '12px' }} className="financial-num">1 : {tradingAnalytics.riskRewardRatio.toFixed(2)}</strong>
                         </div>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '8px' }}>
-                          <span style={{ color: 'var(--text-secondary)', fontSize: '13px' }}>Avg Win / Loss</span>
-                          <span className="financial-num" style={{ fontSize: '12px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.04)', paddingBottom: '6px' }}>
+                          <span style={{ color: 'var(--text-secondary)', fontSize: '12px' }}>Avg Win / Loss</span>
+                          <span className="financial-num" style={{ fontSize: '11px' }}>
                             <strong style={{ color: 'var(--success-color)' }}>{formatCurrency(tradingAnalytics.avgWin)}</strong>
                             <strong style={{ color: 'var(--text-muted)', margin: '0 4px' }}>/</strong>
                             <strong style={{ color: 'var(--danger-color)' }}>{formatCurrency(tradingAnalytics.avgLoss)}</strong>
                           </span>
                         </div>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', paddingBottom: '4px' }}>
-                          <span style={{ color: 'var(--text-secondary)', fontSize: '13px' }}>Max Win / Loss</span>
-                          <span className="financial-num" style={{ fontSize: '12px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', paddingBottom: '2px' }}>
+                          <span style={{ color: 'var(--text-secondary)', fontSize: '12px' }}>Max Win / Loss</span>
+                          <span className="financial-num" style={{ fontSize: '11px' }}>
                             <strong style={{ color: 'var(--success-color)' }}>+{formatCurrency(tradingAnalytics.maxWinVal)}</strong>
                             <strong style={{ color: 'var(--text-muted)', margin: '0 4px' }}>/</strong>
                             <strong style={{ color: 'var(--danger-color)' }}>-{formatCurrency(tradingAnalytics.maxLossVal)}</strong>
@@ -3315,187 +3337,145 @@ function App() {
               {activeTab === 'dashboard' && !isMobile && (
                 <Space direction="vertical" size="large" style={{ width: '100%' }}>
                   
-                  {/* KPI Cards Row */}
+                  {/* HERO GRID SECTION */}
                   <Row gutter={[24, 24]}>
-                    <Col xs={24} sm={12} md={6}>
-                      <Card bordered={false} className="glass-panel glow-card-cyan">
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <span style={{ fontSize: '11px', color: 'var(--text-secondary)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.8px' }}>
-                            Total Invested
-                          </span>
-                          <WalletOutlined style={{ color: 'var(--primary-color)', fontSize: '16px' }} />
+                    {/* Hero Widget 1: Account Valuation & Capital Efficiency */}
+                    <Col xs={24} lg={10}>
+                      <Card bordered={false} className="glass-panel glow-card-cyan" styles={{ body: { padding: '24px' } }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                          <div>
+                            <span style={{ fontSize: '11px', color: 'var(--text-secondary)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '1px' }}>
+                              Net Asset Value (NAV)
+                            </span>
+                            <div style={{ fontSize: '32px', fontWeight: 800, color: '#ffffff', marginTop: '4px', fontFamily: 'var(--font-family-mono)', letterSpacing: '-0.5px' }}>
+                              {formatCurrency(netAssetValue)}
+                            </div>
+                          </div>
+                          <div style={{ background: 'rgba(0, 242, 254, 0.1)', padding: '10px', borderRadius: '12px' }}>
+                            <WalletOutlined style={{ color: 'var(--primary-color)', fontSize: '24px' }} />
+                          </div>
                         </div>
-                        <div style={{ fontSize: '24px', fontWeight: 700, color: '#ffffff', marginTop: '10px', fontFamily: 'var(--font-family-mono)' }}>
-                          {formatCurrency(kpis.totalInvestedConverted)}
-                        </div>
-                        <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px', fontWeight: 500 }}>
-                          Active capital in current assets
-                        </div>
-                      </Card>
-                    </Col>
-                    
-                    <Col xs={24} sm={12} md={6}>
-                      <Card bordered={false} className="glass-panel glow-card-cyan">
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <span style={{ fontSize: '11px', color: 'var(--text-secondary)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.8px' }}>
-                            Current Value
-                          </span>
-                          <GlobalOutlined style={{ color: 'var(--primary-color)', fontSize: '16px' }} />
-                        </div>
-                        <div style={{ fontSize: '24px', fontWeight: 700, color: '#ffffff', marginTop: '10px', fontFamily: 'var(--font-family-mono)' }}>
-                          {formatCurrency(kpis.currentMarketValueConverted)}
-                        </div>
-                        <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px', fontWeight: 500 }}>
-                          Valuation based on live feeds
-                        </div>
-                      </Card>
-                    </Col>
 
-                    <Col xs={24} sm={12} md={6}>
-                      <Card 
-                        bordered={false} 
-                        className={`glass-panel ${kpis.totalRealizedPnLConverted >= 0 ? 'glow-card-green' : 'glow-card-red'}`}
-                      >
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <span style={{ fontSize: '11px', color: 'var(--text-secondary)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.8px' }}>
-                            Realized P&L
-                          </span>
-                          {kpis.totalRealizedPnLConverted >= 0 
-                            ? <RiseOutlined style={{ color: 'var(--success-color)', fontSize: '16px' }} /> 
-                            : <FallOutlined style={{ color: 'var(--danger-color)', fontSize: '16px' }} />
-                          }
-                        </div>
-                        <div style={{ 
-                          fontSize: '24px', 
-                          fontWeight: 700, 
-                          color: kpis.totalRealizedPnLConverted >= 0 ? 'var(--success-color)' : 'var(--danger-color)', 
-                          marginTop: '10px', 
-                          fontFamily: 'var(--font-family-mono)' 
-                        }}>
-                          {kpis.totalRealizedPnLConverted >= 0 ? '+' : ''}{formatCurrency(kpis.totalRealizedPnLConverted)}
-                        </div>
-                        <div style={{ 
-                          fontSize: '11px', 
-                          color: kpis.totalRealizedPnLConverted >= 0 ? 'var(--success-color)' : 'var(--danger-color)', 
-                          marginTop: '4px', 
-                          fontWeight: 600,
-                          opacity: 0.85
-                        }}>
-                          {kpis.totalRealizedPnLConverted >= 0 ? '● Locked-in profits' : '● Locked-in losses'}
-                        </div>
-                      </Card>
-                    </Col>
-
-                    <Col xs={24} sm={12} md={6}>
-                      <Card 
-                        bordered={false} 
-                        className={`glass-panel ${kpis.totalPnLConverted >= 0 ? 'glow-card-green' : 'glow-card-red'}`}
-                      >
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <span style={{ fontSize: '11px', color: 'var(--text-secondary)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.8px' }}>
-                            Total Return
-                          </span>
-                          {kpis.totalPnLConverted >= 0 
-                            ? <RiseOutlined style={{ color: 'var(--success-color)', fontSize: '16px' }} /> 
-                            : <FallOutlined style={{ color: 'var(--danger-color)', fontSize: '16px' }} />
-                          }
-                        </div>
-                        <div style={{ 
-                          fontSize: '24px', 
-                          fontWeight: 700, 
-                          color: kpis.totalPnLConverted >= 0 ? 'var(--success-color)' : 'var(--danger-color)', 
-                          marginTop: '10px', 
-                          fontFamily: 'var(--font-family-mono)' 
-                        }}>
-                          {kpis.totalPnLConverted >= 0 ? '+' : ''}{formatCurrency(kpis.totalPnLConverted)}
-                        </div>
-                        <div style={{ display: 'flex', alignItems: 'center', marginTop: '4px' }}>
+                        {/* Net ROI indicator */}
+                        <div style={{ display: 'flex', alignItems: 'center', marginTop: '12px', gap: '8px' }}>
                           <span style={{
                             display: 'inline-flex',
                             alignItems: 'center',
-                            padding: '1px 6px',
-                            borderRadius: '4px',
-                            fontSize: '10px',
+                            padding: '3px 8px',
+                            borderRadius: '6px',
+                            fontSize: '11px',
                             fontWeight: 'bold',
-                            background: kpis.totalPnLConverted >= 0 ? 'rgba(16, 185, 129, 0.15)' : 'rgba(244, 63, 94, 0.15)',
-                            color: kpis.totalPnLConverted >= 0 ? 'var(--success-color)' : 'var(--danger-color)'
+                            background: netProfit >= 0 ? 'rgba(16, 185, 129, 0.15)' : 'rgba(244, 63, 94, 0.15)',
+                            color: netProfit >= 0 ? 'var(--success-color)' : 'var(--danger-color)'
                           }}>
-                            {kpis.totalPnLConverted >= 0 ? '▲' : '▼'} {kpis.totalPnLPct.toFixed(2)}%
+                            {netProfit >= 0 ? '▲' : '▼'} {netProfit >= 0 ? '+' : ''}{netProfitPct.toFixed(2)}%
                           </span>
-                          <span style={{ marginLeft: '6px', color: 'var(--text-muted)', fontSize: '11px', fontWeight: 500 }}>
-                            All-time yield
+                          <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
+                            ROI ({netProfit >= 0 ? '+' : ''}{formatCurrency(netProfit)})
                           </span>
                         </div>
-                      </Card>
-                    </Col>
-                  </Row>
 
-                  {/* Portfolio Capital & Sizing Row */}
-                  <Row gutter={[24, 24]}>
-                    <Col xs={24} sm={12} md={6}>
-                      <Card bordered={false} className="glass-panel glow-card-cyan">
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <span style={{ fontSize: '11px', color: 'var(--text-secondary)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.8px' }}>
-                            Initial Capital
-                          </span>
-                          <BankOutlined style={{ color: 'var(--primary-color)', fontSize: '16px' }} />
-                        </div>
-                        <div style={{ fontSize: '24px', fontWeight: 700, color: '#ffffff', marginTop: '10px', fontFamily: 'var(--font-family-mono)' }}>
-                          {formatCurrency(portfolioSizing.initialCapital)}
-                        </div>
-                        <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px', fontWeight: 500 }}>
-                          Total allocated fund for port
+                        {/* Capital Utilization / Exposure Bar */}
+                        <div style={{ marginTop: '24px', paddingTop: '16px', borderTop: '1px solid rgba(255,255,255,0.04)' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', marginBottom: '6px' }}>
+                            <span style={{ color: 'var(--text-secondary)' }}>
+                              Exposure: <strong style={{ color: 'var(--primary-color)' }}>{formatCurrency(kpis.currentMarketValueConverted)} ({investedPct.toFixed(1)}%)</strong>
+                            </span>
+                            <span style={{ color: 'var(--text-secondary)' }}>
+                              Cash: <strong style={{ color: 'var(--success-color)' }}>{formatCurrency(portfolioSizing.cashOnHand)} ({cashPct.toFixed(1)}%)</strong>
+                            </span>
+                          </div>
+                          <div style={{ width: '100%', height: '8px', background: 'rgba(255,255,255,0.06)', borderRadius: '4px', overflow: 'hidden', display: 'flex' }}>
+                            <div style={{ width: `${investedPct}%`, height: '100%', background: 'linear-gradient(90deg, #00f2fe 0%, #4facfe 100%)', transition: 'width 0.5s ease' }} />
+                            <div style={{ width: `${cashPct}%`, height: '100%', background: 'linear-gradient(90deg, #10b981 0%, #059669 100%)', transition: 'width 0.5s ease' }} />
+                          </div>
                         </div>
                       </Card>
                     </Col>
 
-                    <Col xs={24} sm={12} md={6}>
-                      <Card bordered={false} className="glass-panel glow-card-cyan">
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <span style={{ fontSize: '11px', color: 'var(--text-secondary)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.8px' }}>
-                            Stocks Target
-                          </span>
-                          <PieChartOutlined style={{ color: 'var(--primary-color)', fontSize: '16px' }} />
+                    {/* Hero Widget 2: Portfolio Return Metrics */}
+                    <Col xs={24} sm={12} lg={7}>
+                      <Card bordered={false} className={`glass-panel ${kpis.totalPnLConverted >= 0 ? 'glow-card-green' : 'glow-card-red'}`} styles={{ body: { padding: '24px', height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' } }}>
+                        <div>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <span style={{ fontSize: '11px', color: 'var(--text-secondary)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '1px' }}>
+                              Total Return P&L
+                            </span>
+                            {kpis.totalPnLConverted >= 0 
+                              ? <RiseOutlined style={{ color: 'var(--success-color)', fontSize: '20px' }} /> 
+                              : <FallOutlined style={{ color: 'var(--danger-color)', fontSize: '20px' }} />
+                            }
+                          </div>
+                          <div style={{ fontSize: '28px', fontWeight: 800, color: kpis.totalPnLConverted >= 0 ? 'var(--success-color)' : 'var(--danger-color)', marginTop: '8px', fontFamily: 'var(--font-family-mono)' }}>
+                            {kpis.totalPnLConverted >= 0 ? '+' : ''}{formatCurrency(kpis.totalPnLConverted)}
+                          </div>
+                          <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '2px' }}>
+                            All-time yield: <strong style={{ color: kpis.totalPnLConverted >= 0 ? 'var(--success-color)' : 'var(--danger-color)' }}>{kpis.totalPnLPct.toFixed(2)}%</strong>
+                          </div>
                         </div>
-                        <div style={{ fontSize: '24px', fontWeight: 700, color: '#ffffff', marginTop: '10px', fontFamily: 'var(--font-family-mono)' }}>
-                          {portfolioSizing.targetStocks}
-                        </div>
-                        <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px', fontWeight: 500 }}>
-                          Target stocks to hold in portfolio
+
+                        <div style={{ marginTop: '20px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', paddingTop: '16px', borderTop: '1px solid rgba(255,255,255,0.04)' }}>
+                          <div>
+                            <span style={{ fontSize: '10px', color: 'var(--text-secondary)', textTransform: 'uppercase', display: 'block', fontWeight: 600 }}>Realized P&L</span>
+                            <span style={{ fontSize: '14px', fontWeight: 700, color: kpis.totalRealizedPnLConverted >= 0 ? 'var(--success-color)' : 'var(--danger-color)', fontFamily: 'var(--font-family-mono)' }}>
+                              {kpis.totalRealizedPnLConverted >= 0 ? '+' : ''}{formatCurrency(kpis.totalRealizedPnLConverted)}
+                            </span>
+                          </div>
+                          <div>
+                            <span style={{ fontSize: '10px', color: 'var(--text-secondary)', textTransform: 'uppercase', display: 'block', fontWeight: 600 }}>Paper P&L</span>
+                            <span style={{ fontSize: '14px', fontWeight: 700, color: kpis.totalUnrealizedPnLConverted >= 0 ? 'var(--success-color)' : 'var(--danger-color)', fontFamily: 'var(--font-family-mono)' }}>
+                              {kpis.totalUnrealizedPnLConverted >= 0 ? '+' : ''}{formatCurrency(kpis.totalUnrealizedPnLConverted)}
+                            </span>
+                          </div>
                         </div>
                       </Card>
                     </Col>
 
-                    <Col xs={24} sm={12} md={6}>
-                      <Card bordered={false} className="glass-panel glow-card-cyan">
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <span style={{ fontSize: '11px', color: 'var(--text-secondary)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.8px' }}>
-                            Cash on Hand
-                          </span>
-                          <DollarOutlined style={{ color: 'var(--primary-color)', fontSize: '16px' }} />
-                        </div>
-                        <div style={{ fontSize: '24px', fontWeight: 700, color: '#ffffff', marginTop: '10px', fontFamily: 'var(--font-family-mono)' }}>
-                          {formatCurrency(portfolioSizing.cashOnHand)}
-                        </div>
-                        <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px', fontWeight: 500 }}>
-                          Initial Capital - Invested + Realized P&L
-                        </div>
-                      </Card>
-                    </Col>
+                    {/* Hero Widget 3: Sizing & Blueprint */}
+                    <Col xs={24} sm={12} lg={7}>
+                      <Card bordered={false} className="glass-panel glow-card-cyan" styles={{ body: { padding: '24px', height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' } }}>
+                        <div>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <span style={{ fontSize: '11px', color: 'var(--text-secondary)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '1px' }}>
+                              Holdings Blueprint
+                            </span>
+                            <PieChartOutlined style={{ color: 'var(--primary-color)', fontSize: '20px' }} />
+                          </div>
+                          
+                          {/* Active Stocks / Target occupied slots */}
+                          <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px', marginTop: '8px' }}>
+                            <span style={{ fontSize: '28px', fontWeight: 800, color: '#ffffff', fontFamily: 'var(--font-family-mono)' }}>
+                              {portfolioSizing.activeHoldingsCount}
+                            </span>
+                            <span style={{ fontSize: '16px', color: 'var(--text-secondary)', fontWeight: 500 }}>
+                              / {portfolioSizing.targetStocks} Target Stocks
+                            </span>
+                          </div>
 
-                    <Col xs={24} sm={12} md={6}>
-                      <Card bordered={false} className="glass-panel glow-card-cyan">
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <span style={{ fontSize: '11px', color: 'var(--text-secondary)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.8px' }}>
-                            Target Position Size
-                          </span>
-                          <SlidersOutlined style={{ color: 'var(--primary-color)', fontSize: '16px' }} />
+                          {/* Progress bar of slot occupancy */}
+                          <div style={{ width: '100%', height: '4px', background: 'rgba(255,255,255,0.06)', borderRadius: '2px', overflow: 'hidden', marginTop: '6px' }}>
+                            <div style={{ 
+                              width: `${Math.min(100, (portfolioSizing.activeHoldingsCount / (portfolioSizing.targetStocks || 1)) * 100)}%`, 
+                              height: '100%', 
+                              background: 'var(--primary-color)', 
+                              transition: 'width 0.5s ease' 
+                            }} />
+                          </div>
                         </div>
-                        <div style={{ fontSize: '24px', fontWeight: 700, color: '#ffffff', marginTop: '10px', fontFamily: 'var(--font-family-mono)' }}>
-                          {formatCurrency(portfolioSizing.positionSizeCash)}
-                        </div>
-                        <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px', fontWeight: 500 }}>
-                          Cash Basis: {formatCurrency(portfolioSizing.positionSizeCash)} | Bal. Basis: {formatCurrency(portfolioSizing.positionSizeBalance)}
+
+                        <div style={{ marginTop: '20px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', paddingTop: '16px', borderTop: '1px solid rgba(255,255,255,0.04)' }}>
+                          <div>
+                            <span style={{ fontSize: '10px', color: 'var(--text-secondary)', textTransform: 'uppercase', display: 'block', fontWeight: 600 }}>Initial Capital</span>
+                            <span style={{ fontSize: '14px', fontWeight: 700, color: '#ffffff', fontFamily: 'var(--font-family-mono)' }}>
+                              {formatCurrency(portfolioSizing.initialCapital)}
+                            </span>
+                          </div>
+                          <div>
+                            <span style={{ fontSize: '10px', color: 'var(--text-secondary)', textTransform: 'uppercase', display: 'block', fontWeight: 600 }}>Pos. Size/Trade</span>
+                            <span style={{ fontSize: '14px', fontWeight: 700, color: 'var(--primary-color)', fontFamily: 'var(--font-family-mono)' }}>
+                              {formatCurrency(portfolioSizing.positionSizeCash)}
+                            </span>
+                          </div>
                         </div>
                       </Card>
                     </Col>
@@ -3555,70 +3535,149 @@ function App() {
                     </Col>
                   </Row>
 
-                  {/* Trading Analytics Card Row */}
+                  {/* Trading Analytics Section */}
                   <Row gutter={[24, 24]}>
                     <Col span={24}>
-                      <Card title="📊 Trading Analytics & Statistics" bordered={false}>
-                        <Row gutter={[16, 16]}>
-                          <Col xs={12} sm={8} md={4}>
-                            <div style={{ textAlign: 'center', background: 'rgba(255, 255, 255, 0.02)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '12px 6px' }}>
-                              <Text type="secondary" style={{ fontSize: '10px', textTransform: 'uppercase', display: 'block', marginBottom: '6px', fontWeight: 600 }}>Total Trades</Text>
-                              <Title level={4} style={{ color: '#ffffff', margin: 0 }} className="financial-num">{tradingAnalytics.totalTrades}</Title>
-                              <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '4px' }}>
-                                {tradingAnalytics.buysCount} Buy | {tradingAnalytics.sellsCount} Sell
+                      <Card title="📊 Trading Analytics & Performance Statistics" bordered={false} className="glass-panel">
+                        <Row gutter={[32, 24]} align="middle">
+                          {/* Circular Win Rate Meter */}
+                          <Col xs={24} md={8} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', borderRight: !isMobile ? '1px solid rgba(255,255,255,0.06)' : 'none' }}>
+                            <div style={{ position: 'relative', display: 'inline-flex' }}>
+                              <Progress
+                                type="circle"
+                                percent={Number(tradingAnalytics.winRate.toFixed(1))}
+                                strokeWidth={8}
+                                width={120}
+                                strokeColor={{
+                                  '0%': 'var(--danger-color)',
+                                  '50%': 'rgba(245, 158, 11, 0.8)',
+                                  '100%': 'var(--success-color)',
+                                }}
+                                trailColor="rgba(255,255,255,0.05)"
+                                format={(pct) => (
+                                  <div style={{ color: '#ffffff' }}>
+                                    <div style={{ fontSize: '20px', fontWeight: 800, fontFamily: 'var(--font-family-mono)' }}>{pct}%</div>
+                                    <div style={{ fontSize: '10px', color: 'var(--text-secondary)', textTransform: 'uppercase', fontWeight: 600, marginTop: '2px' }}>Win Rate</div>
+                                  </div>
+                                )}
+                              />
+                            </div>
+                            <div style={{ display: 'flex', gap: '20px', marginTop: '16px', textAlign: 'center' }}>
+                              <div>
+                                <span style={{ fontSize: '11px', color: 'var(--success-color)', fontWeight: 700, display: 'block' }}>{tradingAnalytics.winCount} Wins</span>
+                                <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>Green Deals</span>
                               </div>
+                              <div style={{ borderLeft: '1px solid rgba(255,255,255,0.1)', height: '24px' }} />
+                              <div>
+                                <span style={{ fontSize: '11px', color: 'var(--danger-color)', fontWeight: 700, display: 'block' }}>{tradingAnalytics.lossCount} Losses</span>
+                                <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>Red Deals</span>
+                              </div>
+                            </div>
+                            <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '8px', fontWeight: 500 }}>
+                              Total Closed Transactions: <strong style={{ color: '#ffffff' }}>{tradingAnalytics.totalClosedTrades}</strong>
                             </div>
                           </Col>
-                          <Col xs={12} sm={8} md={4}>
-                            <div style={{ textAlign: 'center', background: 'rgba(255, 255, 255, 0.02)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '12px 6px' }}>
-                              <Text type="secondary" style={{ fontSize: '10px', textTransform: 'uppercase', display: 'block', marginBottom: '6px', fontWeight: 600 }}>Win Rate</Text>
-                              <Title level={4} style={{ color: tradingAnalytics.winRate >= 50 ? 'var(--success-color)' : 'var(--danger-color)', margin: 0 }} className="financial-num">
-                                {tradingAnalytics.winRate.toFixed(1)}%
-                              </Title>
-                              <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '4px' }}>
-                                {tradingAnalytics.winCount} W - {tradingAnalytics.lossCount} L
-                              </div>
-                            </div>
-                          </Col>
-                          <Col xs={12} sm={8} md={4}>
-                            <div style={{ textAlign: 'center', background: 'rgba(255, 255, 255, 0.02)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '12px 6px' }}>
-                              <Text type="secondary" style={{ fontSize: '10px', textTransform: 'uppercase', display: 'block', marginBottom: '6px', fontWeight: 600 }}>Profit Factor</Text>
-                              <Title level={4} style={{ color: tradingAnalytics.profitFactor >= 1.5 ? 'var(--success-color)' : (tradingAnalytics.profitFactor >= 1 ? '#ffffff' : 'var(--danger-color)'), margin: 0 }} className="financial-num">
-                                {tradingAnalytics.profitFactor === Infinity ? '∞' : tradingAnalytics.profitFactor.toFixed(2)}
-                              </Title>
-                              <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '4px' }}>
-                                Gross Profit / Loss
-                              </div>
-                            </div>
-                          </Col>
-                          <Col xs={12} sm={8} md={4}>
-                            <div style={{ textAlign: 'center', background: 'rgba(255, 255, 255, 0.02)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '12px 6px' }}>
-                              <Text type="secondary" style={{ fontSize: '10px', textTransform: 'uppercase', display: 'block', marginBottom: '6px', fontWeight: 600 }}>Risk-Reward Ratio</Text>
-                              <Title level={4} style={{ color: '#ffffff', margin: 0 }} className="financial-num">
-                                1 : {tradingAnalytics.riskRewardRatio.toFixed(2)}
-                              </Title>
-                              <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '4px' }}>
-                                Avg Loss vs Avg Win
-                              </div>
-                            </div>
-                          </Col>
-                          <Col xs={12} sm={8} md={4}>
-                            <div style={{ textAlign: 'center', background: 'rgba(255, 255, 255, 0.02)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '12px 6px' }}>
-                              <Text type="secondary" style={{ fontSize: '10px', textTransform: 'uppercase', display: 'block', marginBottom: '6px', fontWeight: 600 }}>Avg Win / Avg Loss</Text>
-                              <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', marginTop: '4px' }} className="financial-num">
-                                <span style={{ color: 'var(--success-color)', fontSize: '13px', fontWeight: 'bold' }}>{formatCurrency(tradingAnalytics.avgWin)}</span>
-                                <span style={{ color: 'var(--danger-color)', fontSize: '13px', fontWeight: 'bold' }}>{formatCurrency(tradingAnalytics.avgLoss)}</span>
-                              </div>
-                            </div>
-                          </Col>
-                          <Col xs={12} sm={8} md={4}>
-                            <div style={{ textAlign: 'center', background: 'rgba(255, 255, 255, 0.02)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '12px 6px' }}>
-                              <Text type="secondary" style={{ fontSize: '10px', textTransform: 'uppercase', display: 'block', marginBottom: '6px', fontWeight: 600 }}>Max Win / Max Loss</Text>
-                              <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', marginTop: '4px' }} className="financial-num">
-                                <span style={{ color: 'var(--success-color)', fontSize: '13px', fontWeight: 'bold' }}>+{formatCurrency(tradingAnalytics.maxWinVal)}</span>
-                                <span style={{ color: 'var(--danger-color)', fontSize: '13px', fontWeight: 'bold' }}>-{formatCurrency(tradingAnalytics.maxLossVal)}</span>
-                              </div>
-                            </div>
+
+                          {/* Efficiency & Averages Metrics */}
+                          <Col xs={24} md={16}>
+                            <Row gutter={[24, 20]}>
+                              {/* Profit Factor */}
+                              <Col xs={12} sm={8}>
+                                <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+                                  <span style={{ fontSize: '11px', color: 'var(--text-secondary)', textTransform: 'uppercase', fontWeight: 600 }}>Profit Factor</span>
+                                  <strong style={{ 
+                                    fontSize: '22px', 
+                                    color: tradingAnalytics.profitFactor >= 1.5 ? 'var(--success-color)' : (tradingAnalytics.profitFactor >= 1.0 ? '#f59e0b' : 'var(--danger-color)'), 
+                                    fontFamily: 'var(--font-family-mono)',
+                                    marginTop: '4px'
+                                  }}>
+                                    {tradingAnalytics.profitFactor === Infinity ? '∞' : tradingAnalytics.profitFactor.toFixed(2)}
+                                  </strong>
+                                  <span style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>
+                                    {tradingAnalytics.profitFactor >= 1.5 ? '🏆 Excellent' : (tradingAnalytics.profitFactor >= 1.0 ? '⚖️ Profitable' : '⚠️ Unprofitable')}
+                                  </span>
+                                  <div style={{ marginTop: '8px' }}>
+                                    <Progress 
+                                      percent={Math.min(100, (tradingAnalytics.profitFactor / 3.0) * 100)} 
+                                      showInfo={false} 
+                                      size="small" 
+                                      status={tradingAnalytics.profitFactor >= 1.5 ? 'success' : (tradingAnalytics.profitFactor >= 1.0 ? 'normal' : 'exception')}
+                                      strokeColor={tradingAnalytics.profitFactor >= 1.5 ? 'var(--success-color)' : (tradingAnalytics.profitFactor >= 1.0 ? '#f59e0b' : 'var(--danger-color)')}
+                                    />
+                                  </div>
+                                </div>
+                              </Col>
+
+                              {/* Risk Reward */}
+                              <Col xs={12} sm={8}>
+                                <div style={{ display: 'flex', flexDirection: 'column' }}>
+                                  <span style={{ fontSize: '11px', color: 'var(--text-secondary)', textTransform: 'uppercase', fontWeight: 600 }}>Risk-Reward Ratio</span>
+                                  <strong style={{ fontSize: '22px', color: '#ffffff', fontFamily: 'var(--font-family-mono)', marginTop: '4px' }}>
+                                    1 : {tradingAnalytics.riskRewardRatio.toFixed(2)}
+                                  </strong>
+                                  <span style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>
+                                    Avg Loss vs Avg Win
+                                  </span>
+                                  <div style={{ marginTop: '8px' }}>
+                                    <Progress 
+                                      percent={Math.min(100, (tradingAnalytics.riskRewardRatio / 3.0) * 100)} 
+                                      showInfo={false} 
+                                      size="small" 
+                                      strokeColor="var(--primary-color)"
+                                    />
+                                  </div>
+                                </div>
+                              </Col>
+
+                              {/* Total Trades Count */}
+                              <Col xs={12} sm={8}>
+                                <div style={{ display: 'flex', flexDirection: 'column' }}>
+                                  <span style={{ fontSize: '11px', color: 'var(--text-secondary)', textTransform: 'uppercase', fontWeight: 600 }}>Total Actions logged</span>
+                                  <strong style={{ fontSize: '22px', color: '#ffffff', fontFamily: 'var(--font-family-mono)', marginTop: '4px' }}>
+                                    {tradingAnalytics.totalTrades}
+                                  </strong>
+                                  <span style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>
+                                    {tradingAnalytics.buysCount} Buys / {tradingAnalytics.sellsCount} Sells
+                                  </span>
+                                </div>
+                              </Col>
+
+                              {/* Avg Win / Loss */}
+                              <Col xs={12} sm={12}>
+                                <div style={{ background: 'rgba(255, 255, 255, 0.02)', padding: '12px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.03)' }}>
+                                  <span style={{ fontSize: '11px', color: 'var(--text-secondary)', textTransform: 'uppercase', fontWeight: 600, display: 'block', marginBottom: '6px' }}>Avg Win vs Avg Loss</span>
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                    <div>
+                                      <span style={{ fontSize: '10px', color: 'var(--text-muted)', display: 'block' }}>AVERAGE WIN</span>
+                                      <strong style={{ color: 'var(--success-color)', fontSize: '14px', fontFamily: 'var(--font-family-mono)' }}>{formatCurrency(tradingAnalytics.avgWin)}</strong>
+                                    </div>
+                                    <div style={{ borderLeft: '1px solid rgba(255,255,255,0.06)', height: '20px' }} />
+                                    <div>
+                                      <span style={{ fontSize: '10px', color: 'var(--text-muted)', display: 'block' }}>AVERAGE LOSS</span>
+                                      <strong style={{ color: 'var(--danger-color)', fontSize: '14px', fontFamily: 'var(--font-family-mono)' }}>{formatCurrency(tradingAnalytics.avgLoss)}</strong>
+                                    </div>
+                                  </div>
+                                </div>
+                              </Col>
+
+                              {/* Max Win / Loss */}
+                              <Col xs={12} sm={12}>
+                                <div style={{ background: 'rgba(255, 255, 255, 0.02)', padding: '12px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.03)' }}>
+                                  <span style={{ fontSize: '11px', color: 'var(--text-secondary)', textTransform: 'uppercase', fontWeight: 600, display: 'block', marginBottom: '6px' }}>Extreme Trades (Max)</span>
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                    <div>
+                                      <span style={{ fontSize: '10px', color: 'var(--text-muted)', display: 'block' }}>BIGGEST WIN</span>
+                                      <strong style={{ color: 'var(--success-color)', fontSize: '14px', fontFamily: 'var(--font-family-mono)' }}>+{formatCurrency(tradingAnalytics.maxWinVal)}</strong>
+                                    </div>
+                                    <div style={{ borderLeft: '1px solid rgba(255,255,255,0.06)', height: '20px' }} />
+                                    <div>
+                                      <span style={{ fontSize: '10px', color: 'var(--text-muted)', display: 'block' }}>BIGGEST LOSS</span>
+                                      <strong style={{ color: 'var(--danger-color)', fontSize: '14px', fontFamily: 'var(--font-family-mono)' }}>-{formatCurrency(tradingAnalytics.maxLossVal)}</strong>
+                                    </div>
+                                  </div>
+                                </div>
+                              </Col>
+                            </Row>
                           </Col>
                         </Row>
                       </Card>
