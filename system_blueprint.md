@@ -642,3 +642,20 @@ In Cloud Mode (Google Sheets), the trades list is fetched directly from the shee
 - `backend/main.py`
 - `github_sheets_serverless_deployment_guide.md`
 - `system_blueprint.md`
+
+---
+
+### [2026-06-21] — Feature: Specify Initial Capital and Target Stocks on Portfolio Creation
+
+**Enhancements Applied:**
+1. **Frontend Portfolio Form UI Upgrades:**
+   - Modified `MODAL 2: CREATE PORTFOLIO` in `frontend/src/App.jsx` to include fields for `Initial Capital` (default `2,000,000`) and `Amount of Stock to Hold (Target)` (default `50`).
+   - Updated `handleAddPortfolio` to capture these inputs and sync them locally (`localStorage` and FastAPI `POST /api/portfolios` payload) as well as remotely (Google Sheets Apps Script config updates).
+2. **Backend API Schemas & Data Storage:**
+   - Updated `PortfolioCreate` Pydantic model in `backend/main.py` to accept `initialCapital` and `targetStocks`.
+   - Updated `add_portfolio` endpoint to save custom settings in the `portfolioConfigs` mapping of `db.json` and sync them dynamically to the custom `Portfolios` sheet of your local Excel database.
+
+**Files Changed:**
+- `backend/main.py`
+- `frontend/src/App.jsx`
+- `system_blueprint.md`

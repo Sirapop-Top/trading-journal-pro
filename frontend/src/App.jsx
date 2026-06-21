@@ -1512,12 +1512,26 @@ function App() {
           return prev;
         });
 
+        // Sync configs to localStorage in Cloud Mode
+        const configs = JSON.parse(localStorage.getItem('alphatrader_portfolio_configs') || '{}');
+        configs[name] = {
+          initialCapital: Number(values.initialCapital) || 2000000,
+          targetStocks: Number(values.targetStocks) || 50
+        };
+        localStorage.setItem('alphatrader_portfolio_configs', JSON.stringify(configs));
+
         // Sync with Google Sheet Apps Script in the background
         if (api.url) {
           try {
             await callGoogleAppsScript(api.url, {
               action: "addPortfolio",
               name: name
+            });
+            await callGoogleAppsScript(api.url, {
+              action: "updatePortfolioConfig",
+              name: name,
+              initialCapital: Number(values.initialCapital) || 2000000,
+              targetStocks: Number(values.targetStocks) || 50
             });
           } catch (cloudErr) {
             console.error("Error syncing addPortfolio to cloud:", cloudErr);
@@ -1528,8 +1542,16 @@ function App() {
         setIsPortfolioModalOpen(false);
         portfolioForm.resetFields();
       } else {
-        const response = await axios.post(api.url, { name: values.name });
+        const response = await axios.post(api.url, { 
+          name: values.name,
+          initialCapital: Number(values.initialCapital) || 2000000,
+          targetStocks: Number(values.targetStocks) || 50
+        });
         setPortfolios(response.data.portfolios);
+        
+        // Refetch to refresh configurations mapping locally
+        fetchData();
+        
         message.success(`Portfolio "${values.name}" created.`);
         setIsPortfolioModalOpen(false);
         portfolioForm.resetFields();
@@ -5096,6 +5118,29 @@ function App() {
               ]}
             >
               <Input placeholder="e.g. Retirement Savings, Swing Trade" />
+            </Form.Item>
+
+            <Form.Item
+              name="initialCapital"
+              label="Initial Capital"
+              initialValue={2000000}
+              rules={[{ required: true, message: 'Please input initial capital' }]}
+            >
+              <InputNumber
+                min={0}
+                style={{ width: '100%' }}
+                formatter={value => `${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}
+                parser={value => value.replace(/\$\s?|(,*)/g, '')}
+              />
+            </Form.Item>
+
+            <Form.Item
+              name="targetStocks"
+              label="Amount of Stock to Hold (Target)"
+              initialValue={50}
+              rules={[{ required: true, message: 'Please input amount of stocks' }]}
+            >
+              <InputNumber min={1} max={500} style={{ width: '100%' }} />
             </Form.Item>
 
             <Form.Item style={{ marginBottom: 0, textAlign: 'right' }}>

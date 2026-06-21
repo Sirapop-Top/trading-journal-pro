@@ -38,6 +38,8 @@ class Trade(BaseModel):
 
 class PortfolioCreate(BaseModel):
     name: str
+    initialCapital: Optional[float] = 2000000.0
+    targetStocks: Optional[int] = 50
 
 class PortfolioRename(BaseModel):
     oldName: str
@@ -691,6 +693,15 @@ def add_portfolio(portfolio: PortfolioCreate):
         
     portfolios.append(name)
     db_data["portfolios"] = portfolios
+    
+    # Store custom configurations
+    configs = db_data.get("portfolioConfigs", {})
+    configs[name] = {
+        "initialCapital": portfolio.initialCapital if portfolio.initialCapital is not None else 2000000.0,
+        "targetStocks": portfolio.targetStocks if portfolio.targetStocks is not None else 50
+    }
+    db_data["portfolioConfigs"] = configs
+    
     save_db(db_data)
     rewrite_excel_portfolios_sheet(db_data)
     return {"portfolios": portfolios}
