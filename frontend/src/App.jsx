@@ -361,8 +361,11 @@ function App() {
           const assetCol = pHeaders.indexOf("asset name");
           const portCol = pHeaders.indexOf("portfolio");
           const namesCol = pHeaders.indexOf("portfolio names");
+          const initialCapitalCol = pHeaders.indexOf("initial capital");
+          const targetStocksCol = pHeaders.indexOf("target stocks");
           
           const tempPortfolios = new Set();
+          const tempConfigs = {};
           
           for (let k = 1; k < portRows.length; k++) {
             const pRow = portRows[k];
@@ -379,6 +382,13 @@ function App() {
               const pName = pRow[namesCol].toString().trim();
               if (pName) {
                 tempPortfolios.add(pName);
+                const capital = (initialCapitalCol !== -1 && pRow[initialCapitalCol])
+                  ? (parseFloat(pRow[initialCapitalCol]) || 2000000)
+                  : 2000000;
+                const stocks = (targetStocksCol !== -1 && pRow[targetStocksCol])
+                  ? (parseInt(pRow[targetStocksCol]) || 50)
+                  : 50;
+                tempConfigs[pName] = { initialCapital: capital, targetStocks: stocks };
               }
             }
           }
@@ -390,6 +400,7 @@ function App() {
           // Cache to localStorage for fast offline access
           localStorage.setItem('alphatrader_portfolio_mappings', JSON.stringify(customMappings));
           localStorage.setItem('alphatrader_custom_portfolios', JSON.stringify(customPortfoliosList));
+          localStorage.setItem('alphatrader_portfolio_configs', JSON.stringify(tempConfigs));
         }
       } else {
         // Portfolios sheet tab doesn't exist yet, try to load from localStorage cache
@@ -523,6 +534,9 @@ function App() {
         setPortfolios(response.data.portfolios);
         setLivePrices(response.data.livePrices || {});
         setLiveRates(response.data.liveRates || { THB: 1.0, USD: 32.69, EUR: 38.04 });
+        if (response.data.portfolioConfigs) {
+          localStorage.setItem('alphatrader_portfolio_configs', JSON.stringify(response.data.portfolioConfigs));
+        }
         if (response.data.syncTime) {
           setSyncTime(dayjs(response.data.syncTime).format('YYYY-MM-DD HH:mm:ss'));
         }
@@ -1606,74 +1620,103 @@ function App() {
       }
       localStorage.setItem('alphatrader_portfolio_configs', JSON.stringify(configs));
 
-      if (oldName === newName) {
-        message.success(`Portfolio "${newName}" configuration updated.`);
-        setIsRenameModalOpen(false);
-        renameForm.resetFields();
-        await fetchData();
-        return;
-      }
-
       const api = getApiUrl('/api/portfolios/rename');
       if (api.type === 'cloud') {
-        // Update custom portfolios in localStorage
-        const customPortfolios = JSON.parse(localStorage.getItem('alphatrader_custom_portfolios') || '[]');
-        const updatedCustomPortfolios = customPortfolios.map(p => p === oldName ? newName : p);
-        localStorage.setItem('alphatrader_custom_portfolios', JSON.stringify(updatedCustomPortfolios));
-
-        // Update custom mappings in localStorage
-        const customMappings = JSON.parse(localStorage.getItem('alphatrader_portfolio_mappings') || '{}');
-        let changed = false;
-        for (const asset in customMappings) {
-          if (customMappings[asset] === oldName) {
-            customMappings[asset] = newName;
-            changed = true;
-          }
-        }
-        if (changed) {
-          localStorage.setItem('alphatrader_portfolio_mappings', JSON.stringify(customMappings));
-        }
-
-        // Update state
-        setPortfolios(prev => prev.map(p => p === oldName ? newName : p));
-        if (activePortfolio === oldName) {
-          setActivePortfolio(newName);
-        }
-
         // Sync with Google Sheet Apps Script in the background
         if (api.url) {
           try {
             await callGoogleAppsScript(api.url, {
-              action: "renamePortfolio",
-              oldName: oldName,
-              newName: newName
+              action: "updatePortfolioConfig",
+              name: oldName,
+              initialCapital: initialCapital,
+              targetStocks: targetStocks
             });
+            if (oldName !== newName) {
+              await callGoogleAppsScript(api.url, {
+                action: "renamePortfolio",
+                oldName: oldName,
+                newName: newName
+              });
+              await callGoogleAppsScript(api.url, {
+                action: "updatePortfolioConfig",
+                name: newName,
+                initialCapital: initialCapital,
+                targetStocks: targetStocks
+              });
+            }
           } catch (cloudErr) {
-            console.error("Error syncing renamePortfolio to cloud:", cloudErr);
+            console.error("Error syncing configs to cloud:", cloudErr);
           }
         }
 
-        message.success(`Portfolio renamed successfully to "${newName}".`);
+        if (oldName !== newName) {
+          // Update custom portfolios in localStorage
+          const customPortfolios = JSON.parse(localStorage.getItem('alphatrader_custom_portfolios') || '[]');
+          const updatedCustomPortfolios = customPortfolios.map(p => p === oldName ? newName : p);
+          localStorage.setItem('alphatrader_custom_portfolios', JSON.stringify(updatedCustomPortfolios));
+
+          // Update custom mappings in localStorage
+          const customMappings = JSON.parse(localStorage.getItem('alphatrader_portfolio_mappings') || '{}');
+          let changed = false;
+          for (const asset in customMappings) {
+            if (customMappings[asset] === oldName) {
+              customMappings[asset] = newName;
+              changed = true;
+            }
+          }
+          if (changed) {
+            localStorage.setItem('alphatrader_portfolio_mappings', JSON.stringify(customMappings));
+          }
+
+          // Update state
+          setPortfolios(prev => prev.map(p => p === oldName ? newName : p));
+          if (activePortfolio === oldName) {
+            setActivePortfolio(newName);
+          }
+          message.success(`Portfolio renamed successfully to "${newName}".`);
+        } else {
+          message.success(`Portfolio "${newName}" configuration updated.`);
+        }
+
         setIsRenameModalOpen(false);
         renameForm.resetFields();
         await fetchData();
       } else {
-        const response = await axios.put(`${API_BASE}/api/portfolios/rename`, {
-          oldName: oldName,
-          newName: newName
+        // Local Mode
+        await axios.put(`${API_BASE}/api/portfolios/config`, {
+          name: oldName,
+          initialCapital: initialCapital,
+          targetStocks: targetStocks
         });
-        setPortfolios(response.data.portfolios);
-        await fetchData();
-        if (activePortfolio === oldName) {
-          setActivePortfolio(newName);
+        
+        if (oldName !== newName) {
+          const response = await axios.put(`${API_BASE}/api/portfolios/rename`, {
+            oldName: oldName,
+            newName: newName
+          });
+          setPortfolios(response.data.portfolios);
+          
+          await axios.put(`${API_BASE}/api/portfolios/config`, {
+            name: newName,
+            initialCapital: initialCapital,
+            targetStocks: targetStocks
+          });
+          
+          if (activePortfolio === oldName) {
+            setActivePortfolio(newName);
+          }
+          message.success(`Portfolio renamed successfully to "${newName}".`);
+        } else {
+          message.success(`Portfolio "${newName}" configuration updated.`);
         }
-        message.success(`Portfolio renamed successfully to "${newName}".`);
+        
         setIsRenameModalOpen(false);
         renameForm.resetFields();
+        await fetchData();
       }
     } catch (error) {
-      console.error('Error renaming portfolio:', error);
-      message.error(error.response?.data?.detail || 'Failed to rename portfolio.');
+      console.error('Error configuring portfolio:', error);
+      message.error(error.response?.data?.detail || 'Failed to configure portfolio.');
     }
   };
 

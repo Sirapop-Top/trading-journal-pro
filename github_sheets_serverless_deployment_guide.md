@@ -132,6 +132,9 @@ function doPost(e) {
   } else if (action === "updateTradePortfolio") {
     return ContentService.createTextOutput(JSON.stringify(updateTradePortfolio(contents.tradeId, contents.targetPortfolio)))
       .setMimeType(ContentService.MimeType.JSON);
+  } else if (action === "updatePortfolioConfig") {
+    return ContentService.createTextOutput(JSON.stringify(updatePortfolioConfig(contents.name, contents.initialCapital, contents.targetStocks)))
+      .setMimeType(ContentService.MimeType.JSON);
   }
   
   // Fallback for legacy direct form uploads
@@ -259,9 +262,36 @@ function getDashboardData() {
     } catch(err) {}
   }
   
+  // Override or fetch portfolios custom names and configs from the "Portfolios" sheet if it exists
+  var portfolioConfigs = {};
+  try {
+    var pSheet = getOrCreatePortfoliosSheet();
+    var pRowIdx = pSheet.getLastRow();
+    if (pRowIdx >= 2) {
+      if (pSheet.getLastColumn() < 5) {
+        pSheet.getRange(1, 4, 1, 2).setValues([["Initial Capital", "Target Stocks"]]);
+      }
+      var customPorts = pSheet.getRange(2, 3, pRowIdx - 1, 3).getValues();
+      var tempPorts = [];
+      for (var k = 0; k < customPorts.length; k++) {
+        var pName = customPorts[k][0].toString().trim();
+        if (pName) {
+          tempPorts.push(pName);
+          var capital = parseFloat(customPorts[k][1]) || 2000000;
+          var stocks = parseInt(customPorts[k][2]) || 50;
+          portfolioConfigs[pName] = { initialCapital: capital, targetStocks: stocks };
+        }
+      }
+      if (tempPorts.length > 0) {
+        portfolios = tempPorts;
+      }
+    }
+  } catch(e) {}
+
   return {
     trades: trades,
     portfolios: portfolios,
+    portfolioConfigs: portfolioConfigs,
     livePrices: livePrices,
     liveRates: liveRates,
     syncTime: new Date().toISOString()
@@ -482,6 +512,35 @@ function addPortfolio(name) {
   if (lastRow === 1) targetRow = 2;
   
   sheet.getRange(targetRow, 3).setValue(name);
+  return { success: true };
+}
+
+function updatePortfolioConfig(name, initialCapital, targetStocks) {
+  var sheet = getOrCreatePortfoliosSheet();
+  var lastRow = sheet.getLastRow();
+  
+  if (sheet.getLastColumn() < 5) {
+    sheet.getRange(1, 4, 1, 2).setValues([["Initial Capital", "Target Stocks"]]);
+  }
+  
+  var nameValues = sheet.getRange(1, 3, lastRow, 1).getValues();
+  var found = false;
+  for (var i = 1; i < nameValues.length; i++) {
+    if (nameValues[i][0].toString().trim().toLowerCase() === name.toLowerCase()) {
+      sheet.getRange(i + 1, 4).setValue(initialCapital);
+      sheet.getRange(i + 1, 5).setValue(targetStocks);
+      found = true;
+      break;
+    }
+  }
+  
+  if (!found) {
+    addPortfolio(name);
+    var newLastRow = sheet.getLastRow();
+    sheet.getRange(newLastRow, 4).setValue(initialCapital);
+    sheet.getRange(newLastRow, 5).setValue(targetStocks);
+  }
+  
   return { success: true };
 }
 

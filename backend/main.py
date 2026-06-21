@@ -43,6 +43,11 @@ class PortfolioRename(BaseModel):
     oldName: str
     newName: str
 
+class PortfolioConfigUpdate(BaseModel):
+    name: str
+    initialCapital: float
+    targetStocks: int
+
 class PositionTransfer(BaseModel):
     assetName: str
     sourcePortfolio: str
@@ -192,12 +197,30 @@ def load_from_excel_and_save():
             }
             trades.append(trade)
 
-        # Retrieve unique portfolios from lists or default
+        # Retrieve portfolios and configs from Excel if available
         portfolios = ["Main Investment", "Short-Term Trading", "Crypto"]
-        
+        portfolio_configs = {}
+        try:
+            p_df = pd.read_excel(EXCEL_PATH, sheet_name="Portfolios")
+            temp_ports = []
+            for _, p_row in p_df.iterrows():
+                p_name = str(p_row.get("Portfolio Names", "")).strip() if pd.notna(p_row.get("Portfolio Names")) else ""
+                if p_name and p_name != "nan" and p_name != "":
+                    temp_ports.append(p_name)
+                    capital = float(p_row.get("Initial Capital")) if pd.notna(p_row.get("Initial Capital")) else 2000000.0
+                    stocks = int(p_row.get("Target Stocks")) if pd.notna(p_row.get("Target Stocks")) else 50
+                    portfolio_configs[p_name] = {"initialCapital": capital, "targetStocks": stocks}
+            if temp_ports:
+                portfolios = temp_ports
+        except Exception as p_err:
+            print("No Portfolios sheet parsed from Excel, loading cached from db.json:", p_err)
+            portfolio_configs = old_data.get("portfolioConfigs", {})
+            portfolios = old_data.get("portfolios", ["Main Investment", "Short-Term Trading", "Crypto"])
+            
         data = {
             "trades": trades,
             "portfolios": portfolios,
+            "portfolioConfigs": portfolio_configs,
             "google_sheet_id": old_data.get("google_sheet_id", ""),
             "google_apps_script_url": old_data.get("google_apps_script_url", ""),
             "synced_google_form_timestamps": old_data.get("synced_google_form_timestamps", [])
@@ -415,6 +438,7 @@ def get_dashboard_data():
     return {
         "trades": trades,
         "portfolios": portfolios,
+        "portfolioConfigs": db_data.get("portfolioConfigs", {}),
         "livePrices": price_cache["prices"],
         "liveRates": price_cache["rates"],
         "syncTime": price_cache["last_updated"],
@@ -575,6 +599,47 @@ def update_trade_strategy(trade_id: str, update_data: TradeStrategyUpdate):
             
     return found_trade
 
+def rewrite_excel_portfolios_sheet(db_data):
+    if not os.path.exists(EXCEL_PATH):
+        return
+    try:
+        import openpyxl
+        wb = openpyxl.load_workbook(EXCEL_PATH)
+        
+        # Check if Portfolios sheet exists
+        if 'Portfolios' not in wb.sheetnames:
+            p_sheet = wb.create_sheet('Portfolios')
+            p_sheet.cell(row=1, column=1, value="Asset Name")
+            p_sheet.cell(row=1, column=2, value="Portfolio")
+            p_sheet.cell(row=1, column=3, value="Portfolio Names")
+            p_sheet.cell(row=1, column=4, value="Initial Capital")
+            p_sheet.cell(row=1, column=5, value="Target Stocks")
+        else:
+            p_sheet = wb['Portfolios']
+            
+        # Clean columns 3, 4, 5 (C, D, E) starting from row 2
+        for row in range(2, p_sheet.max_row + 2):
+            p_sheet.cell(row=row, column=3, value=None)
+            p_sheet.cell(row=row, column=4, value=None)
+            p_sheet.cell(row=row, column=5, value=None)
+            
+        # Write portfolios list and configs
+        portfolios = db_data.get("portfolios", [])
+        configs = db_data.get("portfolioConfigs", {})
+        
+        for idx, name in enumerate(portfolios):
+            row_num = idx + 2
+            p_sheet.cell(row=row_num, column=3, value=name)
+            
+            conf = configs.get(name, {"initialCapital": 2000000, "targetStocks": 50})
+            p_sheet.cell(row=row_num, column=4, value=conf.get("initialCapital", 2000000))
+            p_sheet.cell(row=row_num, column=5, value=conf.get("targetStocks", 50))
+            
+        wb.save(EXCEL_PATH)
+        print("Excel Portfolios config sheet written.")
+    except Exception as e:
+        print("Error writing Excel Portfolios sheet:", e)
+
 @app.post("/api/portfolios")
 def add_portfolio(portfolio: PortfolioCreate):
     db_data = load_db()
@@ -590,6 +655,7 @@ def add_portfolio(portfolio: PortfolioCreate):
     portfolios.append(name)
     db_data["portfolios"] = portfolios
     save_db(db_data)
+    rewrite_excel_portfolios_sheet(db_data)
     return {"portfolios": portfolios}
 
 @app.delete("/api/portfolios/{portfolio_name}")
@@ -610,9 +676,39 @@ def delete_portfolio(portfolio_name: str):
         raise HTTPException(status_code=400, detail="Cannot delete portfolio with existing trades. Please reassign or delete the trades first.")
         
     portfolios.remove(portfolio_name)
+    configs = db_data.get("portfolioConfigs", {})
+    if portfolio_name in configs:
+        del configs[portfolio_name]
+    db_data["portfolioConfigs"] = configs
     db_data["portfolios"] = portfolios
     save_db(db_data)
+    rewrite_excel_portfolios_sheet(db_data)
     return {"portfolios": portfolios}
+
+@app.put("/api/portfolios/config")
+def update_portfolio_config(payload: PortfolioConfigUpdate):
+    db_data = load_db()
+    portfolios = db_data.get("portfolios", [])
+    configs = db_data.get("portfolioConfigs", {})
+    
+    name = payload.name.strip()
+    if name not in portfolios:
+        portfolios.append(name)
+        db_data["portfolios"] = portfolios
+        
+    configs[name] = {
+        "initialCapital": payload.initialCapital,
+        "targetStocks": payload.targetStocks
+    }
+    db_data["portfolioConfigs"] = configs
+    save_db(db_data)
+    rewrite_excel_portfolios_sheet(db_data)
+    
+    return {
+        "success": True,
+        "portfolios": portfolios,
+        "portfolioConfigs": configs
+    }
 
 @app.put("/api/portfolios/rename")
 def rename_portfolio(payload: PortfolioRename):
@@ -636,6 +732,13 @@ def rename_portfolio(payload: PortfolioRename):
     idx = portfolios.index(old_name)
     portfolios[idx] = new_name
     
+    # Rename config keys
+    configs = db_data.get("portfolioConfigs", {})
+    if old_name in configs:
+        configs[new_name] = configs[old_name]
+        del configs[old_name]
+    db_data["portfolioConfigs"] = configs
+    
     # Migrate all connected trades in database
     updated_count = 0
     for trade in trades:
@@ -650,6 +753,7 @@ def rename_portfolio(payload: PortfolioRename):
     # Sync with Excel sheet if any changes were made
     if updated_count > 0:
         rewrite_excel_from_db(trades)
+    rewrite_excel_portfolios_sheet(db_data)
         
     return {
         "portfolios": portfolios,
