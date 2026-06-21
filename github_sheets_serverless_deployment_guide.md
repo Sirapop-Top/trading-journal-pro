@@ -176,13 +176,67 @@ function ensureTableStructure() {
       journalSheet.getRange(1, 1, 1, JOURNAL_HEADERS.length).setFontWeight("bold");
       journalSheet.setFrozenRows(1);
     } else {
-      var currentHeaders = journalSheet.getRange(1, 1, 1, lastCol).getValues()[0].map(function(h) {
-        return h.toString().toLowerCase().trim();
-      });
+      // Overwrite/sanitize headers to fix trailing spaces or any corrupted values
+      var rawHeaders = journalSheet.getRange(1, 1, 1, lastCol).getValues()[0];
+      var cleanHeaders = [];
+      var changed = false;
+      
+      for (var i = 0; i < rawHeaders.length; i++) {
+        var h = rawHeaders[i].toString().trim();
+        var hLower = h.toLowerCase();
+        var cleanH = h;
+        
+        if (hLower.indexOf("timestamp") !== -1) {
+          cleanH = "Timestamp";
+        } else if (hLower.indexOf("date") !== -1) {
+          cleanH = "Date";
+        } else if (hLower.indexOf("asset name") !== -1 || hLower.indexOf("asset_name") !== -1) {
+          cleanH = "Asset Name";
+        } else if (hLower.indexOf("asset type") !== -1 || hLower.indexOf("asset_type") !== -1) {
+          cleanH = "Asset Type";
+        } else if (hLower.indexOf("currency") !== -1) {
+          cleanH = "Currency";
+        } else if (hLower.indexOf("action") !== -1) {
+          cleanH = "Action";
+        } else if (hLower.indexOf("quantity") !== -1 || hLower.indexOf("qty") !== -1) {
+          cleanH = "Quantity";
+        } else if (hLower.indexOf("price/unit") !== -1 || hLower.indexOf("price_unit") !== -1 || hLower.indexOf("price unit") !== -1) {
+          cleanH = "Price/Unit";
+        } else if (hLower.indexOf("portfolio") !== -1 || hLower.indexOf("port") !== -1) {
+          cleanH = "Portfolio";
+        } else if (hLower.indexOf("amount") !== -1) {
+          cleanH = "Amount";
+        } else if (hLower.indexOf("current price") !== -1) {
+          cleanH = "Current Price";
+        } else if (hLower.indexOf("current value") !== -1) {
+          cleanH = "Current Value";
+        } else if (hLower.indexOf("p&l %") !== -1) {
+          cleanH = "P&L %";
+        } else if (hLower.indexOf("p&l") !== -1) {
+          cleanH = "P&L";
+        } else if (hLower.indexOf("fee") !== -1) {
+          cleanH = "Fee Rate (%)";
+        } else if (hLower.indexOf("why") !== -1 || hLower.indexOf("decision") !== -1 || hLower.indexOf("reason") !== -1) {
+          cleanH = "Why (Decision Reason)";
+        } else if (hLower.indexOf("remark") !== -1 || hLower.indexOf("note") !== -1) {
+          cleanH = "Remark";
+        }
+        
+        if (cleanH !== h) changed = true;
+        cleanHeaders.push(cleanH);
+      }
+      
+      if (changed) {
+        journalSheet.getRange(1, 1, 1, cleanHeaders.length).setValues([cleanHeaders]);
+        journalSheet.getRange(1, 1, 1, cleanHeaders.length).setFontWeight("bold");
+      }
+      
+      // Auto-append missing headers
+      var currentHeadersLower = cleanHeaders.map(function(ch) { return ch.toLowerCase().trim(); });
       var missingHeaders = [];
       for (var i = 0; i < JOURNAL_HEADERS.length; i++) {
         var hLower = JOURNAL_HEADERS[i].toLowerCase().trim();
-        if (currentHeaders.indexOf(hLower) === -1) {
+        if (currentHeadersLower.indexOf(hLower) === -1) {
           missingHeaders.push(JOURNAL_HEADERS[i]);
         }
       }
@@ -215,13 +269,41 @@ function ensureTableStructure() {
       portfoliosSheet.getRange(1, 1, 1, PORTFOLIOS_HEADERS.length).setFontWeight("bold");
       portfoliosSheet.setFrozenRows(1);
     } else {
-      var currentHeaders = portfoliosSheet.getRange(1, 1, 1, lastCol).getValues()[0].map(function(h) {
-        return h.toString().toLowerCase().trim();
-      });
+      var rawHeaders = portfoliosSheet.getRange(1, 1, 1, lastCol).getValues()[0];
+      var cleanHeaders = [];
+      var changed = false;
+      
+      for (var i = 0; i < rawHeaders.length; i++) {
+        var h = rawHeaders[i].toString().trim();
+        var hLower = h.toLowerCase();
+        var cleanH = h;
+        
+        if (hLower.indexOf("asset name") !== -1 || hLower.indexOf("asset_name") !== -1) {
+          cleanH = "Asset Name";
+        } else if (hLower.indexOf("portfolio names") !== -1 || hLower.indexOf("portfolio_names") !== -1) {
+          cleanH = "Portfolio Names";
+        } else if (hLower.indexOf("portfolio") !== -1) {
+          cleanH = "Portfolio";
+        } else if (hLower.indexOf("initial capital") !== -1 || hLower.indexOf("initial_capital") !== -1) {
+          cleanH = "Initial Capital";
+        } else if (hLower.indexOf("target stocks") !== -1 || hLower.indexOf("target_stocks") !== -1) {
+          cleanH = "Target Stocks";
+        }
+        
+        if (cleanH !== h) changed = true;
+        cleanHeaders.push(cleanH);
+      }
+      
+      if (changed) {
+        portfoliosSheet.getRange(1, 1, 1, cleanHeaders.length).setValues([cleanHeaders]);
+        portfoliosSheet.getRange(1, 1, 1, cleanHeaders.length).setFontWeight("bold");
+      }
+      
+      var currentHeadersLower = cleanHeaders.map(function(ch) { return ch.toLowerCase().trim(); });
       var missingHeaders = [];
       for (var i = 0; i < PORTFOLIOS_HEADERS.length; i++) {
         var hLower = PORTFOLIOS_HEADERS[i].toLowerCase().trim();
-        if (currentHeaders.indexOf(hLower) === -1) {
+        if (currentHeadersLower.indexOf(hLower) === -1) {
           missingHeaders.push(PORTFOLIOS_HEADERS[i]);
         }
       }

@@ -867,6 +867,7 @@ def sync_google_sheet():
         
         synced_timestamps = db_data.get("synced_google_form_timestamps", [])
         synced_set = set(synced_timestamps)
+        actually_present_sigs = set()
         
         new_trades_count = 0
         trades_list = db_data.get("trades", [])
@@ -939,6 +940,13 @@ def sync_google_sheet():
                     row_sig = f"sig-{row_date}-{row_asset}-{row_action}-{row_qty}-{row_price}".strip()
                 except Exception:
                     row_sig = ""
+                
+                # Track what is actually present in the Google Sheet database
+                if row_asset:
+                    if ts_str:
+                        actually_present_sigs.add(ts_str)
+                    if row_sig:
+                        actually_present_sigs.add(row_sig)
                     
                 # Skip if already imported or matches an existing local trade signature
                 if ts_str in synced_set or (row_sig and row_sig in existing_local_sigs):
@@ -1048,8 +1056,8 @@ def sync_google_sheet():
                 # Check signature
                 sig = f"sig-{date_val}-{asset_val}-{action_val}-{qty_val}-{price_val}".strip()
                 
-                # If this local trade signature was not found in the Google Sheet, upload it!
-                if sig not in synced_set:
+                # If this local trade signature is not actually present in the Google Sheet, upload it!
+                if sig not in actually_present_sigs:
                     print(f"[Google Sheet Sync] Uploading missing local trade to cloud sheet: {asset_val}...")
                     payload = {
                         "action": "addTrade",
