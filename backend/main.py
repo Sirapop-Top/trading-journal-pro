@@ -34,6 +34,7 @@ class Trade(BaseModel):
     priceUnit: float
     why: str
     remark: Optional[str] = ""
+    feeRate: Optional[float] = 0.0
 
 class PortfolioCreate(BaseModel):
     name: str
@@ -160,6 +161,21 @@ def load_from_excel_and_save():
                 if asset_type.lower() == "crypto":
                     portfolio = "Crypto"
 
+            # Parse fee rate from Excel
+            fee_rate = 0.0
+            if pd.notna(row.get("Fee Rate (%)")):
+                try:
+                    raw_fee = str(row.get("Fee Rate (%)")).replace("%", "").strip()
+                    fee_rate = float(raw_fee)
+                except Exception:
+                    fee_rate = 0.0
+            elif pd.notna(row.get("Fee Rate")):
+                try:
+                    raw_fee = str(row.get("Fee Rate")).replace("%", "").strip()
+                    fee_rate = float(raw_fee)
+                except Exception:
+                    fee_rate = 0.0
+
             trade = {
                 "id": str(index + 1),
                 "date": date_val,
@@ -171,7 +187,8 @@ def load_from_excel_and_save():
                 "quantity": quantity,
                 "priceUnit": price_unit,
                 "why": why,
-                "remark": remark
+                "remark": remark,
+                "feeRate": fee_rate
             }
             trades.append(trade)
 
@@ -239,7 +256,8 @@ def append_trade_to_excel(trade: Trade):
         sheet.cell(row=new_row, column=7, value=trade.priceUnit)
         
         # Formulas
-        sheet.cell(row=new_row, column=8, value=f"=F{new_row}*G{new_row}")
+        # Amount formula includes fee: Buy: qty * price * (1 + fee%/100); Sell: qty * price * (1 - fee%/100)
+        sheet.cell(row=new_row, column=8, value=f'=IF(E{new_row}="Buy",F{new_row}*G{new_row}*(1+P{new_row}/100),F{new_row}*G{new_row}*(1-P{new_row}/100))')
         # Default Current Price to the buy price initially (will be updated when sheet is recalculated)
         sheet.cell(row=new_row, column=9, value=trade.priceUnit) 
         sheet.cell(row=new_row, column=10, value=f"=F{new_row}*I{new_row}")
@@ -253,6 +271,11 @@ def append_trade_to_excel(trade: Trade):
         if sheet.cell(row=1, column=15).value is None:
             sheet.cell(row=1, column=15, value="Portfolio")
         sheet.cell(row=new_row, column=15, value=trade.portfolio)
+
+        # Write fee rate
+        if sheet.cell(row=1, column=16).value is None:
+            sheet.cell(row=1, column=16, value="Fee Rate (%)")
+        sheet.cell(row=new_row, column=16, value=trade.feeRate)
         
         wb.save(EXCEL_PATH)
         print(f"Appended trade ID {trade.id} to Excel.")
@@ -461,6 +484,7 @@ def add_trade(trade: Trade):
             print(f"[Google Apps Script Write] Logging trade to Google Sheet...")
             payload = {
                 "date": trade.date,
+                "portfolio": trade.portfolio,
                 "assetName": trade.assetName,
                 "assetType": trade.assetType,
                 "currency": trade.currency,
@@ -468,7 +492,8 @@ def add_trade(trade: Trade):
                 "quantity": trade.quantity,
                 "priceUnit": trade.priceUnit,
                 "why": trade.why,
-                "remark": trade.remark
+                "remark": trade.remark,
+                "feeRate": trade.feeRate
             }
             resp = requests.post(apps_script_url, json=payload, timeout=10)
             if resp.status_code == 200:
@@ -701,55 +726,7 @@ def transfer_trade(trade_id: str, payload: TradeTransfer):
     
     return {"success": True, "trade_id": trade_id, "new_portfolio": target}
 
-def rewrite_excel_from_db(trades_list):
-    """Rewrites the Excel 'Journal' sheet from the list of trades to keep them in sync."""
-    if not os.path.exists(EXCEL_PATH):
-        return
-    try:
-        import openpyxl
-        wb = openpyxl.load_workbook(EXCEL_PATH)
-        if 'Journal' not in wb.sheetnames:
-            return
-            
-        sheet = wb['Journal']
-        # Clear existing rows except headers (row 1)
-        while sheet.max_row > 1:
-            sheet.delete_rows(2)
-            
-        sheet.cell(row=1, column=15, value="Portfolio")
-            
-        for index, trade in enumerate(trades_list):
-            row = index + 2
-            
-            # Convert date
-            try:
-                date_obj = datetime.datetime.strptime(trade["date"], "%Y-%m-%d")
-            except Exception:
-                date_obj = trade["date"]
-                
-            sheet.cell(row=row, column=1, value=date_obj)
-            sheet.cell(row=row, column=2, value=trade["assetName"])
-            sheet.cell(row=row, column=3, value=trade["assetType"])
-            sheet.cell(row=row, column=4, value=trade["currency"])
-            sheet.cell(row=row, column=5, value=trade["action"])
-            sheet.cell(row=row, column=6, value=trade["quantity"])
-            sheet.cell(row=row, column=7, value=trade["priceUnit"])
-            
-            # Formulas
-            sheet.cell(row=row, column=8, value=f"=F{row}*G{row}")
-            sheet.cell(row=row, column=9, value=trade["priceUnit"]) # Default current price
-            sheet.cell(row=row, column=10, value=f"=F{row}*I{row}")
-            sheet.cell(row=row, column=11, value=f'=IF(E{row}="Buy",(I{row}-G{row})*F{row},(G{row}-I{row})*F{row})')
-            sheet.cell(row=row, column=12, value=f"=IF(H{row}=0,0,K{row}/H{row})")
-            
-            sheet.cell(row=row, column=13, value=trade["why"])
-            sheet.cell(row=row, column=14, value=trade["remark"] or "")
-            sheet.cell(row=row, column=15, value=trade.get("portfolio", ""))
-            
-        wb.save(EXCEL_PATH)
-        print("Excel rewritten from db state.")
-    except Exception as e:
-        print("Error rewriting Excel from DB:", e)
+# End of portfolio mappings API section
 
 # Trigger initial load on startup
 load_db()
@@ -822,6 +799,7 @@ def sync_google_sheet():
             price_unit_idx = find_col_idx(["price/unit", "price_unit", "price unit", "price"])
             why_idx = find_col_idx(["why", "decision", "reason"])
             remark_idx = find_col_idx(["remark", "note"])
+            fee_rate_idx = find_col_idx(["fee rate", "fee_rate", "fee %", "fee_pct", "fee"])
             
             for idx_row, row in df.iterrows():
                 ts_val = row.iloc[timestamp_idx] if timestamp_idx is not None else None
@@ -887,6 +865,14 @@ def sync_google_sheet():
                     why = str(row.iloc[why_idx]).strip() if why_idx is not None and pd.notna(row.iloc[why_idx]) else ""
                     remark = str(row.iloc[remark_idx]).strip() if remark_idx is not None and pd.notna(row.iloc[remark_idx]) else ""
                     
+                    fee_rate = 0.0
+                    if fee_rate_idx is not None and pd.notna(row.iloc[fee_rate_idx]):
+                        try:
+                            raw_fee = str(row.iloc[fee_rate_idx]).replace("%", "").strip()
+                            fee_rate = float(raw_fee)
+                        except Exception:
+                            fee_rate = 0.0
+
                     if not asset_name:
                         continue
                         
@@ -912,7 +898,8 @@ def sync_google_sheet():
                         "quantity": quantity,
                         "priceUnit": price_unit,
                         "why": why,
-                        "remark": remark
+                        "remark": remark,
+                        "feeRate": fee_rate
                     }
                     
                     trades_list.append(new_trade)
@@ -928,7 +915,8 @@ def sync_google_sheet():
                         quantity=quantity,
                         priceUnit=price_unit,
                         why=why,
-                        remark=remark
+                        remark=remark,
+                        feeRate=fee_rate
                     )
                     append_trade_to_excel(trade_obj)
                     
@@ -1106,7 +1094,8 @@ def rewrite_excel_from_db(trades):
             sheet.cell(row=row_num, column=7, value=price)
             
             # Formulas
-            sheet.cell(row=row_num, column=8, value=f"=F{row_num}*G{row_num}")
+            # Amount formula includes fee: Buy: qty * price * (1 + fee%/100); Sell: qty * price * (1 - fee%/100)
+            sheet.cell(row=row_num, column=8, value=f'=IF(E{row_num}="Buy",F{row_num}*G{row_num}*(1+P{row_num}/100),F{row_num}*G{row_num}*(1-P{row_num}/100))')
             sheet.cell(row=row_num, column=9, value=price) # default live price to cost
             sheet.cell(row=row_num, column=10, value=f"=F{row_num}*I{row_num}")
             sheet.cell(row=row_num, column=11, value=f'=IF(E{row_num}="Buy",(I{row_num}-G{row_num})*F{row_num},(G{row_num}-I{row_num})*F{row_num})')
@@ -1114,6 +1103,16 @@ def rewrite_excel_from_db(trades):
             
             sheet.cell(row=row_num, column=13, value=t.get("why", ""))
             sheet.cell(row=row_num, column=14, value=t.get("remark", ""))
+            
+            # Write portfolio
+            if sheet.cell(row=1, column=15).value is None:
+                sheet.cell(row=1, column=15, value="Portfolio")
+            sheet.cell(row=row_num, column=15, value=t.get("portfolio", "Main Investment"))
+
+            # Write fee rate
+            if sheet.cell(row=1, column=16).value is None:
+                sheet.cell(row=1, column=16, value="Fee Rate (%)")
+            sheet.cell(row=row_num, column=16, value=t.get("feeRate", 0.0))
             
         wb.save(EXCEL_PATH)
         print(f"[Cleanup] Re-wrote Excel sheet with {len(trades)} deduplicated trades.")

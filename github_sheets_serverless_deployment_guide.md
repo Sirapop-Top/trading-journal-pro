@@ -344,6 +344,15 @@ function addTrade(trade) {
     var newCol = sheet.getLastColumn() + 1;
     sheet.getRange(1, newCol).setValue("Portfolio");
     sheet.getRange(newRowIdx, newCol).setValue(trade.portfolio);
+    headersLower.push("portfolio");
+  }
+
+  var feeRateWritten = writeCell(["fee rate", "fee_rate", "fee %", "fee"], trade.feeRate !== undefined ? trade.feeRate : 0.0);
+  if (feeRateWritten === -1 && trade.feeRate !== undefined) {
+    var newCol = sheet.getLastColumn() + 1;
+    sheet.getRange(1, newCol).setValue("Fee Rate (%)");
+    sheet.getRange(newRowIdx, newCol).setValue(trade.feeRate);
+    headersLower.push("fee rate (%)");
   }
   
   // Try to write formulas dynamically for computed columns (Amount, Current Value, P&L, etc.)
@@ -355,6 +364,7 @@ function addTrade(trade) {
   var curValueIdx = findIdxInArray(headersLower, ["current value"]);
   var pnlIdx = findIdxInArray(headersLower, ["p&l"]);
   var pnlPctIdx = findIdxInArray(headersLower, ["p&l %"]);
+  var feeIdx = findIdxInArray(headersLower, ["fee rate", "fee_rate", "fee %", "fee"]);
   
   var qtyLetter = getColumnLetter(qtyIdx + 1);
   var priceLetter = getColumnLetter(priceIdx + 1);
@@ -362,9 +372,14 @@ function addTrade(trade) {
   var curPriceLetter = getColumnLetter(curPriceIdx + 1);
   var amountLetter = getColumnLetter(amountIdx + 1);
   var pnlLetter = getColumnLetter(pnlIdx + 1);
-
+  var feeLetter = getColumnLetter(feeIdx + 1);
+ 
   if (amountIdx !== -1 && qtyLetter && priceLetter) {
-    sheet.getRange(newRowIdx, amountIdx + 1).setFormula("=" + qtyLetter + newRowIdx + "*" + priceLetter + newRowIdx);
+    if (feeLetter) {
+      sheet.getRange(newRowIdx, amountIdx + 1).setFormula('=IF(' + actionLetter + newRowIdx + '="Buy",' + qtyLetter + newRowIdx + '*' + priceLetter + newRowIdx + '*(1+' + feeLetter + newRowIdx + '/100),' + qtyLetter + newRowIdx + '*' + priceLetter + newRowIdx + '*(1-' + feeLetter + newRowIdx + '/100))');
+    } else {
+      sheet.getRange(newRowIdx, amountIdx + 1).setFormula("=" + qtyLetter + newRowIdx + "*" + priceLetter + newRowIdx);
+    }
   }
   
   if (curPriceIdx !== -1) {

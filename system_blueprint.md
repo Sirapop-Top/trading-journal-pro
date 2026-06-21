@@ -572,3 +572,36 @@ In Cloud Mode (Google Sheets), the trades list is fetched directly from the shee
 **Files Changed:**
 - `frontend/src/App.jsx`
 - `system_blueprint.md`
+
+---
+
+### [2026-06-21] — Feature: Portfolio Sizing KPIs, Optional Trading Fees, and Realized/Unrealized P&L Updates
+
+**Request:**
+1. Add optional trading fee (defaulting to 0.168% but user-adjustable) when logging trades to calculate total cost.
+2. Implement chronological running Weighted Average Cost (WAC) to compute realized P&L for partial sells, display avg. cost basis and fees in journal, and rename P&L column to "Realized / Unrealized P&L".
+3. Fix mobile active positions where "Avg. cost" displays as `-`.
+4. Allow user configuration of portfolio `Initial Capital` and `Target Stocks` to compute target `Position Size` per trade.
+
+**Fixes & Enhancements Applied:**
+1. **Optional Trading Fees:**
+   - **Frontend UI Form:** Integrated `applyFee` (checkbox) and `feeRate` (numeric input, default `0.168`) into the Log Trade form.
+   - **Excel Integration:** Updated local Excel loaders/writers in `backend/main.py` and the dynamic Google Apps Script `addTrade` function in `github_sheets_serverless_deployment_guide.md` to support the fee rate column (Column 16) and calculate total trade amount in Column 8 including the fee: `Amount = qty * price * (1 + fee%/100)` for BUY, and `(1 - fee%/100)` for SELL.
+2. **Chronological running WAC & Realized P&L:**
+   - Modified `tradesWithRunningStats` in `App.jsx` to calculate WAC. Sells realize P&L dynamically based on the current running average buy cost, and buys update the average cost basis including fees.
+   - Updated the Trading Journal's desktop table to rename the P&L column to `Realized / Unrealized P&L` and displayed transaction-level average cost basis and fee percentage.
+3. **Mobile Active Position Fix:**
+   - Fixed the mobile Active Positions card where "Avg Buy Price" rendered as `-` by replacing the undefined reference `pos.avgBuyPrice` with the correctly computed `pos.wac` property.
+4. **Portfolio Capital & Position Sizing KPIs:**
+   - **Configure Portfolio Modal:** Redesigned the renaming modal in `App.jsx` to support full portfolio configurations including `Initial Capital` (default `2,000,000`) and `Target Stocks to Hold` (default `50`). Saves config settings to `localStorage`.
+   - **Dashboard Metrics Row:** Added a beautiful row of glass-panel metrics on both desktop and mobile layouts showcasing:
+     - **Initial Capital**
+     - **Stocks Target**
+     - **Cash on Hand** (`Initial Capital - Cost of Active Positions + Realized P&L`)
+     - **Target Position Size** (displays both Cash Basis: `(Cash on Hand + Realized P&L) / Target Stocks` and Balance Basis: `(Initial Capital + Realized P&L) / Target Stocks` to prevent confusion).
+
+**Files Changed:**
+- `backend/main.py`
+- `frontend/src/App.jsx`
+- `github_sheets_serverless_deployment_guide.md`
+- `system_blueprint.md`

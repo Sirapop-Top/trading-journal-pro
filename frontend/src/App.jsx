@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { 
   Layout, Menu, Button, Card, Statistic, Table, Modal, 
   Form, Input, InputNumber, Select, DatePicker, Row, Col, Space, 
-  Spin, Tag, Typography, Popconfirm, message, Alert, Switch, ConfigProvider, theme
+  Spin, Tag, Typography, Popconfirm, message, Alert, Switch, ConfigProvider, theme, Checkbox
 } from 'antd';
 import { 
   DashboardOutlined, 
@@ -28,7 +28,11 @@ import {
   EyeInvisibleOutlined,
   LockOutlined,
   EditOutlined,
-  LogoutOutlined
+  LogoutOutlined,
+  BankOutlined,
+  PieChartOutlined,
+  DollarOutlined,
+  SlidersOutlined
 } from '@ant-design/icons';
 import { 
   AreaChart, Area, PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend,
@@ -140,6 +144,15 @@ const CURRENCY_SYMBOLS = {
 };
 
 function App() {
+  const getPortfolioConfig = (pName) => {
+    try {
+      const configs = JSON.parse(localStorage.getItem('alphatrader_portfolio_configs') || '{}');
+      return configs[pName] || { initialCapital: 2000000, targetStocks: 50 };
+    } catch (e) {
+      return { initialCapital: 2000000, targetStocks: 50 };
+    }
+  };
+
   // Navigation & State
   const [activeTab, setActiveTab] = useState('dashboard');
   const [trades, setTrades] = useState([]);
@@ -329,6 +342,7 @@ function App() {
     const whyIdx = findColIdx(["why", "decision", "reason"]);
     const remarkIdx = findColIdx(["remark", "note"]);
     const portfolioIdx = findColIdx(["portfolio", "port"]);
+    const feeRateIdx = findColIdx(["fee rate", "fee_rate", "fee %", "fee_pct", "fee"]);
     
     const loadedTrades = [];
     const loadedPortfolios = new Set();
@@ -426,6 +440,14 @@ function App() {
       const qty = quantityIdx !== -1 ? parseFloat(row[quantityIdx]) : 0;
       const price = priceUnitIdx !== -1 ? parseFloat(row[priceUnitIdx]) : 0;
       
+      let parsedFee = 0.0;
+      if (feeRateIdx !== -1 && row[feeRateIdx]) {
+        try {
+          const rawFee = row[feeRateIdx].toString().replace('%', '').trim();
+          parsedFee = parseFloat(rawFee) || 0.0;
+        } catch (e) {}
+      }
+
       loadedTrades.push({
         id: (i + 1).toString(),   // ID = actual spreadsheet row number (header=row1, data starts at row2)
         date: dateVal,
@@ -437,7 +459,8 @@ function App() {
         quantity: isNaN(qty) ? 0 : qty,
         priceUnit: isNaN(price) ? 0 : price,
         why: whyIdx !== -1 && row[whyIdx] ? row[whyIdx].toString().trim() : "",
-        remark: remarkIdx !== -1 && row[remarkIdx] ? row[remarkIdx].toString().trim() : ""
+        remark: remarkIdx !== -1 && row[remarkIdx] ? row[remarkIdx].toString().trim() : "",
+        feeRate: parsedFee
       });
       
       loadedPortfolios.add(portfolio);
@@ -671,14 +694,78 @@ function App() {
     return trades.filter(t => t.portfolio === activePortfolio);
   }, [trades, activePortfolio]);
 
+  // Running stats for all filtered trades chronologically
+  const tradesWithRunningStats = useMemo(() => {
+    const sorted = [...filteredTrades].sort((a, b) => {
+      const dateA = a.date || '';
+      const dateB = b.date || '';
+      if (dateA !== dateB) return dateA.localeCompare(dateB);
+      const idA = parseInt(a.id) || 0;
+      const idB = parseInt(b.id) || 0;
+      return idA - idB;
+    });
+
+    const running = {}; // key: assetName -> { qty: 0, totalCost: 0 }
+    const statsMap = {}; // key: trade.id -> { avgCostBasis, realizedPnL, unrealizedPnL, feeAmount }
+
+    sorted.forEach(trade => {
+      const name = trade.assetName;
+      if (!running[name]) {
+        running[name] = { qty: 0, totalCost: 0 };
+      }
+      const holding = running[name];
+      const qty = Number(trade.quantity) || 0;
+      const price = Number(trade.priceUnit) || 0;
+      const feeRate = trade.feeRate !== undefined ? Number(trade.feeRate) : 0.0;
+      const isBuy = trade.action.toLowerCase() === 'buy';
+
+      const feeAmount = qty * price * (feeRate / 100);
+      const avgCostBefore = holding.qty > 0 ? (holding.totalCost / holding.qty) : 0;
+
+      if (isBuy) {
+        const costBasis = qty * price + feeAmount;
+        holding.qty += qty;
+        holding.totalCost += costBasis;
+        const avgCostAfter = holding.qty > 0 ? (holding.totalCost / holding.qty) : 0;
+
+        const lp = livePrices[name] !== undefined && livePrices[name] !== null ? livePrices[name] : price;
+        const unrealizedPnL = qty * lp - costBasis;
+
+        statsMap[trade.id] = {
+          avgCostBasis: avgCostAfter,
+          realizedPnL: 0,
+          unrealizedPnL: unrealizedPnL,
+          feeAmount: feeAmount
+        };
+      } else {
+        const revenue = qty * price - feeAmount;
+        const costOfSharesSold = qty * avgCostBefore;
+        const realizedPnL = revenue - costOfSharesSold;
+
+        holding.qty = Math.max(0, holding.qty - qty);
+        holding.totalCost = holding.qty * avgCostBefore;
+        if (holding.qty === 0) {
+          holding.totalCost = 0;
+        }
+
+        statsMap[trade.id] = {
+          avgCostBasis: avgCostBefore,
+          realizedPnL: realizedPnL,
+          unrealizedPnL: 0,
+          feeAmount: feeAmount
+        };
+      }
+    });
+
+    return statsMap;
+  }, [filteredTrades, livePrices]);
+
   // Advanced Trading Analytics
   const tradingAnalytics = useMemo(() => {
     const totalTrades = filteredTrades.length;
     const buysCount = filteredTrades.filter(t => t.action.toLowerCase() === 'buy').length;
     const sellsCount = filteredTrades.filter(t => t.action.toLowerCase() === 'sell').length;
 
-    const sortedTrades = [...filteredTrades].sort((a, b) => dayjs(a.date).unix() - dayjs(b.date).unix());
-    const assetState = {};
     let winCount = 0;
     let lossCount = 0;
     let grossProfit = 0;
@@ -686,27 +773,15 @@ function App() {
     let maxWinVal = 0;
     let maxLossVal = 0;
 
-    sortedTrades.forEach(trade => {
-      const name = trade.assetName;
-      const qty = Number(trade.quantity) || 0;
-      const price = Number(trade.priceUnit) || 0;
-      const action = trade.action.toLowerCase();
-
-      if (!assetState[name]) {
-        assetState[name] = { qty: 0, totalCost: 0 };
-      }
-      const state = assetState[name];
+    filteredTrades.forEach(trade => {
+      const stats = tradesWithRunningStats[trade.id];
+      if (!stats) return;
 
       const rateToTHB = liveRates[trade.currency] || 1.0;
       const displayRateToTHB = liveRates[displayCurrency] || 1.0;
 
-      if (action === 'buy') {
-        state.qty += qty;
-        state.totalCost += qty * price;
-      } else if (action === 'sell') {
-        const wac = state.qty > 0 ? (state.totalCost / state.qty) : 0;
-        const realizedPnL = (price - wac) * qty;
-        const realizedPnLConverted = (realizedPnL * rateToTHB) / displayRateToTHB;
+      if (trade.action.toLowerCase() === 'sell') {
+        const realizedPnLConverted = (stats.realizedPnL * rateToTHB) / displayRateToTHB;
 
         if (realizedPnLConverted > 0.01) {
           winCount++;
@@ -721,9 +796,6 @@ function App() {
             maxLossVal = Math.abs(realizedPnLConverted);
           }
         }
-
-        state.qty = Math.max(0, state.qty - qty);
-        state.totalCost = Math.max(0, state.totalCost - (qty * wac));
       }
     });
 
@@ -749,7 +821,7 @@ function App() {
       maxWinVal,
       maxLossVal
     };
-  }, [filteredTrades, liveRates, displayCurrency]);
+  }, [filteredTrades, tradesWithRunningStats, liveRates, displayCurrency]);
 
   // Search and filtered trades specifically for the Journal Table display
   const journalFilteredTrades = useMemo(() => {
@@ -781,60 +853,86 @@ function App() {
 
   // Holding calculations for all unique assets, converted to the display currency
   const positions = useMemo(() => {
-    const assetsData = {};
+    // Sort all trades in filteredTrades chronologically
+    const sorted = [...filteredTrades].sort((a, b) => {
+      const dateA = a.date || '';
+      const dateB = b.date || '';
+      if (dateA !== dateB) return dateA.localeCompare(dateB);
+      const idA = parseInt(a.id) || 0;
+      const idB = parseInt(b.id) || 0;
+      return idA - idB;
+    });
 
-    // First pass: Group trades by assetName to sum buys and sells
-    filteredTrades.forEach(trade => {
+    const runningHoldings = {}; // key: assetName -> running stats
+
+    sorted.forEach(trade => {
       const name = trade.assetName;
       if (!name) return;
 
-      if (!assetsData[name]) {
-        assetsData[name] = {
+      if (!runningHoldings[name]) {
+        runningHoldings[name] = {
           assetName: name,
           assetType: trade.assetType || 'Thai Stock',
           currency: trade.currency || 'THB',
+          qty: 0,
+          totalCost: 0,
+          totalRealizedPnL: 0,
           totalBuyQty: 0,
           totalBuyCost: 0,
           totalSellQty: 0,
-          totalSellRevenue: 0,
-          trades: []
+          totalSellRevenue: 0
         };
       }
 
-      assetsData[name].trades.push(trade);
-
+      const holding = runningHoldings[name];
       const qty = Number(trade.quantity) || 0;
       const price = Number(trade.priceUnit) || 0;
+      const feeRate = trade.feeRate !== undefined ? Number(trade.feeRate) : 0.0;
+      const isBuy = trade.action.toLowerCase() === 'buy';
 
-      if (trade.action.toLowerCase() === 'buy') {
-        assetsData[name].totalBuyQty += qty;
-        assetsData[name].totalBuyCost += qty * price;
-      } else if (trade.action.toLowerCase() === 'sell') {
-        assetsData[name].totalSellQty += qty;
-        assetsData[name].totalSellRevenue += qty * price;
+      const feeAmount = qty * price * (feeRate / 100);
+
+      if (isBuy) {
+        const costBasis = qty * price + feeAmount;
+        holding.totalBuyQty += qty;
+        holding.totalBuyCost += costBasis;
+        holding.qty += qty;
+        holding.totalCost += costBasis;
+      } else {
+        const revenue = qty * price - feeAmount;
+        holding.totalSellQty += qty;
+        holding.totalSellRevenue += revenue;
+
+        const avgCostBefore = holding.qty > 0 ? (holding.totalCost / holding.qty) : 0;
+        const costOfSharesSold = qty * avgCostBefore;
+        const realizedPnL = revenue - costOfSharesSold;
+
+        holding.totalRealizedPnL += realizedPnL;
+        holding.qty = Math.max(0, holding.qty - qty);
+        holding.totalCost = holding.qty * avgCostBefore;
+        if (holding.qty === 0) {
+          holding.totalCost = 0;
+        }
       }
     });
 
-    // Second pass: Calculate WAC, holdings, live valuations, and P&Ls converted to displayCurrency
-    return Object.values(assetsData).map(asset => {
-      const qtyHeld = asset.totalBuyQty - asset.totalSellQty;
-      // WAC is average cost of ALL purchases
-      const wac = asset.totalBuyQty > 0 ? (asset.totalBuyCost / asset.totalBuyQty) : 0;
-      const totalCost = qtyHeld * wac;
+    // Map running holdings to final positions array
+    return Object.values(runningHoldings).map(holding => {
+      const qtyHeld = holding.qty;
+      const wac = qtyHeld > 0 ? (holding.totalCost / qtyHeld) : 0;
+      const totalCost = holding.totalCost;
 
       // Single source of truth live price from Yahoo Finance
-      const livePrice = livePrices[asset.assetName] !== undefined && livePrices[asset.assetName] !== null
-        ? livePrices[asset.assetName]
+      const livePrice = livePrices[holding.assetName] !== undefined && livePrices[holding.assetName] !== null
+        ? livePrices[holding.assetName]
         : wac; // Fallback to WAC
 
       const liveValue = qtyHeld * livePrice;
       const unrealizedPnL = liveValue - totalCost;
-      
-      // Realized P&L is total sell revenue minus average cost of quantity sold
-      const realizedPnL = asset.totalSellRevenue - (asset.totalSellQty * wac);
+      const realizedPnL = holding.totalRealizedPnL;
 
       // Exchange rate conversion logic:
-      const rateToTHB = liveRates[asset.currency] || 1.0;
+      const rateToTHB = liveRates[holding.currency] || 1.0;
       const displayRateToTHB = liveRates[displayCurrency] || 1.0;
 
       const totalCostConverted = (totalCost * rateToTHB) / displayRateToTHB;
@@ -846,7 +944,7 @@ function App() {
       const livePriceConverted = (livePrice * rateToTHB) / displayRateToTHB;
 
       return {
-        ...asset,
+        ...holding,
         qtyHeld,
         wac, // local currency
         totalCost, // local currency
@@ -912,6 +1010,45 @@ function App() {
       totalPnLPct
     };
   }, [positions]);
+
+  // Portfolio capital configuration and target sizing calculations
+  const portfolioSizing = useMemo(() => {
+    let initialCapital = 0;
+    let targetStocks = 0;
+    
+    const configs = JSON.parse(localStorage.getItem('alphatrader_portfolio_configs') || '{}');
+    
+    if (activePortfolio === 'All Portfolios') {
+      portfolios.forEach(p => {
+        const c = configs[p] || { initialCapital: 2000000, targetStocks: 50 };
+        initialCapital += c.initialCapital;
+        targetStocks += c.targetStocks;
+      });
+      if (portfolios.length === 0) {
+        initialCapital = 2000000;
+        targetStocks = 50;
+      }
+    } else {
+      const c = configs[activePortfolio] || { initialCapital: 2000000, targetStocks: 50 };
+      initialCapital = c.initialCapital;
+      targetStocks = c.targetStocks;
+    }
+    
+    const totalRealizedPnL = kpis.totalRealizedPnLConverted;
+    const totalInvested = kpis.totalInvestedConverted;
+    
+    const cashOnHand = initialCapital - totalInvested + totalRealizedPnL;
+    const positionSizeBalance = targetStocks > 0 ? (initialCapital + totalRealizedPnL) / targetStocks : 0;
+    const positionSizeCash = targetStocks > 0 ? (cashOnHand + totalRealizedPnL) / targetStocks : 0;
+    
+    return {
+      initialCapital,
+      targetStocks,
+      cashOnHand,
+      positionSizeBalance,
+      positionSizeCash
+    };
+  }, [portfolios, activePortfolio, kpis]);
 
   // ----------------------------------------------------
   // Chart Visual Data Transformations
@@ -1217,7 +1354,8 @@ function App() {
         quantity: values.quantity,
         priceUnit: values.priceUnit,
         why: values.why || '',
-        remark: values.remark || ''
+        remark: values.remark || '',
+        feeRate: values.applyFee ? (parseFloat(values.feeRate) || 0.0) : 0.0
       };
 
       if (api.type === 'cloud') {
@@ -1452,18 +1590,31 @@ function App() {
     }
   };
 
-  // Rename portfolio
+  // Rename/Configure portfolio
   const handleRenamePortfolio = async (values) => {
     try {
-      const api = getApiUrl('/api/portfolios/rename');
       const oldName = renameTarget;
       const newName = values.name.trim();
-      
+      const initialCapital = Number(values.initialCapital) || 0;
+      const targetStocks = Number(values.targetStocks) || 1;
+
+      // Update configs in localStorage
+      const configs = JSON.parse(localStorage.getItem('alphatrader_portfolio_configs') || '{}');
+      configs[newName] = { initialCapital, targetStocks };
+      if (oldName !== newName && oldName) {
+        delete configs[oldName];
+      }
+      localStorage.setItem('alphatrader_portfolio_configs', JSON.stringify(configs));
+
       if (oldName === newName) {
-        message.error("New name must be different from the old name.");
+        message.success(`Portfolio "${newName}" configuration updated.`);
+        setIsRenameModalOpen(false);
+        renameForm.resetFields();
+        await fetchData();
         return;
       }
 
+      const api = getApiUrl('/api/portfolios/rename');
       if (api.type === 'cloud') {
         // Update custom portfolios in localStorage
         const customPortfolios = JSON.parse(localStorage.getItem('alphatrader_custom_portfolios') || '[]');
@@ -1723,12 +1874,41 @@ function App() {
       render: (val, record) => formatCurrency(val, record.currency)
     },
     {
-      title: 'Cost Amount',
+      title: 'Fee (%)',
+      key: 'feeRate',
+      align: 'right',
+      width: 100,
+      render: (_, record) => {
+        const val = record.feeRate !== undefined ? Number(record.feeRate) : 0.0;
+        return val > 0 ? `${val.toFixed(3)}%` : <span style={{ color: 'var(--text-muted)' }}>Free</span>;
+      }
+    },
+    {
+      title: 'Total Cost',
       key: 'amount',
       align: 'right',
-      width: 130,
+      width: 140,
       className: 'financial-num',
-      render: (_, record) => formatCurrency(record.quantity * record.priceUnit, record.currency)
+      render: (_, record) => {
+        const qty = record.quantity;
+        const price = record.priceUnit;
+        const feeRate = record.feeRate !== undefined ? Number(record.feeRate) : 0.0;
+        const isBuy = record.action.toLowerCase() === 'buy';
+        const total = isBuy ? qty * price * (1 + feeRate / 100) : qty * price * (1 - feeRate / 100);
+        return formatCurrency(total, record.currency);
+      }
+    },
+    {
+      title: 'Avg. Cost Basis',
+      key: 'avgCostBasis',
+      align: 'right',
+      width: 140,
+      className: 'financial-num',
+      render: (_, record) => {
+        const stats = tradesWithRunningStats[record.id];
+        const val = stats ? stats.avgCostBasis : 0;
+        return formatCurrency(val, record.currency);
+      }
     },
     {
       title: `Live Price (${displayCurrency})`,
@@ -1746,31 +1926,32 @@ function App() {
       }
     },
     {
-      title: `P&L (${displayCurrency})`,
+      title: `Realized / Unrealized P&L (${displayCurrency})`,
       key: 'pnl',
       align: 'right',
-      width: 130,
+      width: 140,
       className: 'financial-num',
       render: (_, record) => {
-        const qty = record.quantity;
-        const buyPrice = record.priceUnit;
-        const livePrice = livePrices[record.assetName] !== undefined ? livePrices[record.assetName] : buyPrice;
+        const stats = tradesWithRunningStats[record.id];
+        if (!stats) return '-';
         
         const rateToTHB = liveRates[record.currency] || 1.0;
         const displayRateToTHB = liveRates[displayCurrency] || 1.0;
         
-        let pnlConverted = 0;
-        if (record.action.toLowerCase() === 'buy') {
-          pnlConverted = ((livePrice - buyPrice) * qty * rateToTHB) / displayRateToTHB;
-        } else {
-          pnlConverted = ((buyPrice - livePrice) * qty * rateToTHB) / displayRateToTHB;
-        }
+        const isBuy = record.action.toLowerCase() === 'buy';
+        const pnlLocal = isBuy ? stats.unrealizedPnL : stats.realizedPnL;
+        const pnlConverted = (pnlLocal * rateToTHB) / displayRateToTHB;
         
         const isProfit = pnlConverted >= 0;
         return (
-          <span className={isProfit ? 'trend-up' : 'trend-down'}>
-            {isProfit ? '+' : ''}{isCensored ? '****' : pnlConverted.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-          </span>
+          <div style={{ textAlign: 'right' }}>
+            <span className={isProfit ? 'trend-up' : 'trend-down'} style={{ fontWeight: 'bold', display: 'block' }}>
+              {isProfit ? '+' : ''}{isCensored ? '****' : pnlConverted.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            </span>
+            <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
+              {isBuy ? 'Unrealized' : 'Realized'}
+            </span>
+          </div>
         );
       }
     },
@@ -2659,6 +2840,68 @@ function App() {
                     </Col>
                   </Row>
 
+                  {/* Compact Portfolio Capital & Sizing in a 2x2 Grid for Mobile */}
+                  <Row gutter={[12, 12]} style={{ marginTop: '12px' }}>
+                    <Col span={12}>
+                      <Card bordered={false} className="glass-panel glow-card-cyan" styles={{ body: { padding: '12px' } }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <span style={{ fontSize: '9px', color: 'var(--text-secondary)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                            Capital
+                          </span>
+                          <BankOutlined style={{ color: 'var(--primary-color)', fontSize: '13px' }} />
+                        </div>
+                        <div style={{ fontSize: '16px', fontWeight: 700, color: '#ffffff', marginTop: '6px', fontFamily: 'var(--font-family-mono)' }}>
+                          {formatCurrency(portfolioSizing.initialCapital)}
+                        </div>
+                      </Card>
+                    </Col>
+                    
+                    <Col span={12}>
+                      <Card bordered={false} className="glass-panel glow-card-cyan" styles={{ body: { padding: '12px' } }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <span style={{ fontSize: '9px', color: 'var(--text-secondary)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                            Target Hold
+                          </span>
+                          <PieChartOutlined style={{ color: 'var(--primary-color)', fontSize: '13px' }} />
+                        </div>
+                        <div style={{ fontSize: '16px', fontWeight: 700, color: '#ffffff', marginTop: '6px', fontFamily: 'var(--font-family-mono)' }}>
+                          {portfolioSizing.targetStocks} stocks
+                        </div>
+                      </Card>
+                    </Col>
+
+                    <Col span={12}>
+                      <Card bordered={false} className="glass-panel glow-card-cyan" styles={{ body: { padding: '12px' } }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <span style={{ fontSize: '9px', color: 'var(--text-secondary)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                            Cash on Hand
+                          </span>
+                          <DollarOutlined style={{ color: 'var(--primary-color)', fontSize: '13px' }} />
+                        </div>
+                        <div style={{ fontSize: '16px', fontWeight: 700, color: '#ffffff', marginTop: '6px', fontFamily: 'var(--font-family-mono)' }}>
+                          {formatCurrency(portfolioSizing.cashOnHand)}
+                        </div>
+                      </Card>
+                    </Col>
+
+                    <Col span={12}>
+                      <Card bordered={false} className="glass-panel glow-card-cyan" styles={{ body: { padding: '12px' } }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <span style={{ fontSize: '9px', color: 'var(--text-secondary)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                            Pos. Size / Trade
+                          </span>
+                          <SlidersOutlined style={{ color: 'var(--primary-color)', fontSize: '13px' }} />
+                        </div>
+                        <div style={{ fontSize: '16px', fontWeight: 700, color: '#ffffff', marginTop: '6px', fontFamily: 'var(--font-family-mono)' }}>
+                          {formatCurrency(portfolioSizing.positionSizeCash)}
+                        </div>
+                        <div style={{ fontSize: '9px', color: 'var(--text-secondary)', marginTop: '2px' }}>
+                          Bal. basis: {formatCurrency(portfolioSizing.positionSizeBalance)}
+                        </div>
+                      </Card>
+                    </Col>
+                  </Row>
+
                   {/* Chart Selector Horizontal Pills for Mobile */}
                   <div className="mobile-pill-container">
                     <button 
@@ -3122,6 +3365,77 @@ function App() {
                     </Col>
                   </Row>
 
+                  {/* Portfolio Capital & Sizing Row */}
+                  <Row gutter={[24, 24]}>
+                    <Col xs={24} sm={12} md={6}>
+                      <Card bordered={false} className="glass-panel glow-card-cyan">
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <span style={{ fontSize: '11px', color: 'var(--text-secondary)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.8px' }}>
+                            Initial Capital
+                          </span>
+                          <BankOutlined style={{ color: 'var(--primary-color)', fontSize: '16px' }} />
+                        </div>
+                        <div style={{ fontSize: '24px', fontWeight: 700, color: '#ffffff', marginTop: '10px', fontFamily: 'var(--font-family-mono)' }}>
+                          {formatCurrency(portfolioSizing.initialCapital)}
+                        </div>
+                        <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px', fontWeight: 500 }}>
+                          Total allocated fund for port
+                        </div>
+                      </Card>
+                    </Col>
+
+                    <Col xs={24} sm={12} md={6}>
+                      <Card bordered={false} className="glass-panel glow-card-cyan">
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <span style={{ fontSize: '11px', color: 'var(--text-secondary)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.8px' }}>
+                            Stocks Target
+                          </span>
+                          <PieChartOutlined style={{ color: 'var(--primary-color)', fontSize: '16px' }} />
+                        </div>
+                        <div style={{ fontSize: '24px', fontWeight: 700, color: '#ffffff', marginTop: '10px', fontFamily: 'var(--font-family-mono)' }}>
+                          {portfolioSizing.targetStocks}
+                        </div>
+                        <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px', fontWeight: 500 }}>
+                          Target stocks to hold in portfolio
+                        </div>
+                      </Card>
+                    </Col>
+
+                    <Col xs={24} sm={12} md={6}>
+                      <Card bordered={false} className="glass-panel glow-card-cyan">
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <span style={{ fontSize: '11px', color: 'var(--text-secondary)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.8px' }}>
+                            Cash on Hand
+                          </span>
+                          <DollarOutlined style={{ color: 'var(--primary-color)', fontSize: '16px' }} />
+                        </div>
+                        <div style={{ fontSize: '24px', fontWeight: 700, color: '#ffffff', marginTop: '10px', fontFamily: 'var(--font-family-mono)' }}>
+                          {formatCurrency(portfolioSizing.cashOnHand)}
+                        </div>
+                        <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px', fontWeight: 500 }}>
+                          Initial Capital - Invested + Realized P&L
+                        </div>
+                      </Card>
+                    </Col>
+
+                    <Col xs={24} sm={12} md={6}>
+                      <Card bordered={false} className="glass-panel glow-card-cyan">
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <span style={{ fontSize: '11px', color: 'var(--text-secondary)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.8px' }}>
+                            Target Position Size
+                          </span>
+                          <SlidersOutlined style={{ color: 'var(--primary-color)', fontSize: '16px' }} />
+                        </div>
+                        <div style={{ fontSize: '24px', fontWeight: 700, color: '#ffffff', marginTop: '10px', fontFamily: 'var(--font-family-mono)' }}>
+                          {formatCurrency(portfolioSizing.positionSizeCash)}
+                        </div>
+                        <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px', fontWeight: 500 }}>
+                          Cash Basis: {formatCurrency(portfolioSizing.positionSizeCash)} | Bal. Basis: {formatCurrency(portfolioSizing.positionSizeBalance)}
+                        </div>
+                      </Card>
+                    </Col>
+                  </Row>
+
                   {/* Cumulative Performance Line Chart (Over time) */}
                   <Row gutter={[24, 24]}>
                     <Col span={24}>
@@ -3458,6 +3772,7 @@ function App() {
                           onClick={() => {
                             setTickerValidation({ status: 'idle', message: '', checkedTicker: '' });
                             setFormAction('Buy');
+                            tradeForm.resetFields();
                             setIsTradeModalOpen(true);
                           }}
                           style={{ backgroundColor: 'var(--success-color)', border: 'none', fontWeight: 'bold', color: '#06080f' }}
@@ -3518,17 +3833,15 @@ function App() {
                           const isBuy = actionLower === 'buy';
                           const qty = trade.quantity;
                           const buyPrice = trade.priceUnit;
-                          const livePrice = livePrices[trade.assetName] !== undefined ? livePrices[trade.assetName] : buyPrice;
+                          const feeRate = trade.feeRate !== undefined ? Number(trade.feeRate) : 0.0;
                           
+                          const stats = tradesWithRunningStats[trade.id];
                           const rateToTHB = liveRates[trade.currency] || 1.0;
                           const displayRateToTHB = liveRates[displayCurrency] || 1.0;
                           
-                          let pnlConverted = 0;
-                          if (isBuy) {
-                            pnlConverted = ((livePrice - buyPrice) * qty * rateToTHB) / displayRateToTHB;
-                          } else {
-                            pnlConverted = ((buyPrice - livePrice) * qty * rateToTHB) / displayRateToTHB;
-                          }
+                          const pnlLocal = stats ? (isBuy ? stats.unrealizedPnL : stats.realizedPnL) : 0.0;
+                          const pnlConverted = (pnlLocal * rateToTHB) / displayRateToTHB;
+                          const totalCost = isBuy ? qty * buyPrice * (1 + feeRate / 100) : qty * buyPrice * (1 - feeRate / 100);
                           
                           const isProfit = pnlConverted >= 0;
                           const hasDetails = trade.why || trade.remark;
@@ -3562,13 +3875,25 @@ function App() {
                                   </div>
                                 </div>
                                 <div>
-                                  <div className="mobile-feed-card-label">Total Cost</div>
+                                  <div className="mobile-feed-card-label">Fee (%)</div>
                                   <div className="mobile-feed-card-value financial-num">
-                                    {formatCurrency(qty * buyPrice, trade.currency)}
+                                    {feeRate > 0 ? `${feeRate.toFixed(3)}%` : 'Free'}
                                   </div>
                                 </div>
                                 <div>
-                                  <div className="mobile-feed-card-label">P&L ({displayCurrency})</div>
+                                  <div className="mobile-feed-card-label">Total Cost</div>
+                                  <div className="mobile-feed-card-value financial-num">
+                                    {formatCurrency(totalCost, trade.currency)}
+                                  </div>
+                                </div>
+                                <div>
+                                  <div className="mobile-feed-card-label">Avg Cost Basis</div>
+                                  <div className="mobile-feed-card-value financial-num">
+                                    {formatCurrency(stats ? stats.avgCostBasis : buyPrice, trade.currency)}
+                                  </div>
+                                </div>
+                                <div>
+                                  <div className="mobile-feed-card-label">{isBuy ? 'Unrealized P&L' : 'Realized P&L'}</div>
                                   <div className={`mobile-feed-card-value financial-num ${isProfit ? 'trend-up' : 'trend-down'}`}>
                                     {isProfit ? '+' : ''}{isCensored ? '****' : pnlConverted.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                   </div>
@@ -3668,6 +3993,7 @@ function App() {
                           onClick={() => {
                             setTickerValidation({ status: 'idle', message: '', checkedTicker: '' });
                             setFormAction('Buy');
+                            tradeForm.resetFields();
                             setIsTradeModalOpen(true);
                           }}
                           style={{ backgroundColor: 'var(--success-color)', border: 'none', fontWeight: 'bold', color: '#06080f' }}
@@ -3839,7 +4165,7 @@ function App() {
                                 <div>
                                   <div className="mobile-feed-card-label">Avg Buy Price</div>
                                   <div className="mobile-feed-card-value financial-num">
-                                    {formatCurrency(pos.avgBuyPrice, pos.currency)}
+                                    {formatCurrency(pos.wac, pos.currency)}
                                   </div>
                                 </div>
                                 <div>
@@ -3983,46 +4309,58 @@ function App() {
                       <div className="mobile-card-list" style={{ paddingBottom: 0 }}>
                         {portfolios.map(p => {
                           const count = trades.filter(t => t.portfolio === p).length;
+                          const config = getPortfolioConfig(p);
                           return (
-                            <div key={p} className="mobile-feed-card" style={{ padding: '14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderLeft: '4px solid var(--info-color)' }}>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                                <span style={{ fontSize: '18px' }}>💼</span>
-                                <div>
-                                  <div style={{ color: '#ffffff', fontWeight: 'bold', fontSize: '14px' }}>{p}</div>
-                                  <div style={{ color: 'var(--text-secondary)', fontSize: '11px' }}>{count} trades logged</div>
+                            <div key={p} className="mobile-feed-card" style={{ padding: '14px', display: 'flex', flexDirection: 'column', gap: '8px', borderLeft: '4px solid var(--info-color)' }}>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                  <span style={{ fontSize: '18px' }}>💼</span>
+                                  <div>
+                                    <div style={{ color: '#ffffff', fontWeight: 'bold', fontSize: '14px' }}>{p}</div>
+                                    <div style={{ color: 'var(--text-secondary)', fontSize: '11px' }}>{count} trades logged</div>
+                                  </div>
                                 </div>
-                              </div>
-                              <Space size="middle">
-                                <Button 
-                                  type="text" 
-                                  icon={<SettingOutlined />} 
-                                  style={{ padding: 0 }}
-                                  onClick={() => {
-                                    setRenameTarget(p);
-                                    renameForm.setFieldsValue({ name: p });
-                                    setIsRenameModalOpen(true);
-                                  }}
-                                >
-                                  Rename
-                                </Button>
-                                <Popconfirm
-                                  title="Delete Portfolio"
-                                  description={`Are you sure you want to delete portfolio "${p}"?`}
-                                  onConfirm={() => handleDeletePortfolio(p)}
-                                  okText="Delete"
-                                  cancelText="Cancel"
-                                  disabled={portfolios.length > 0 && p === portfolios[0]}
-                                  okButtonProps={{ danger: true }}
-                                >
+                                <Space size="middle">
                                   <Button 
                                     type="text" 
-                                    danger 
-                                    icon={<DeleteOutlined />} 
+                                    icon={<SettingOutlined />} 
                                     style={{ padding: 0 }}
+                                    onClick={() => {
+                                      const conf = getPortfolioConfig(p);
+                                      setRenameTarget(p);
+                                      renameForm.setFieldsValue({ 
+                                        name: p,
+                                        initialCapital: conf.initialCapital,
+                                        targetStocks: conf.targetStocks
+                                      });
+                                      setIsRenameModalOpen(true);
+                                    }}
+                                  >
+                                    Configure
+                                  </Button>
+                                  <Popconfirm
+                                    title="Delete Portfolio"
+                                    description={`Are you sure you want to delete portfolio "${p}"?`}
+                                    onConfirm={() => handleDeletePortfolio(p)}
+                                    okText="Delete"
+                                    cancelText="Cancel"
                                     disabled={portfolios.length > 0 && p === portfolios[0]}
-                                  />
-                                </Popconfirm>
-                              </Space>
+                                    okButtonProps={{ danger: true }}
+                                  >
+                                    <Button 
+                                      type="text" 
+                                      danger 
+                                      icon={<DeleteOutlined />} 
+                                      style={{ padding: 0 }}
+                                      disabled={portfolios.length > 0 && p === portfolios[0]}
+                                    />
+                                  </Popconfirm>
+                                </Space>
+                              </div>
+                              <div style={{ display: 'flex', gap: '20px', fontSize: '11px', color: 'var(--text-secondary)', paddingLeft: '28px' }}>
+                                <div>Capital: <span style={{ color: '#ffffff', fontWeight: 'bold' }}>{formatCurrency(config.initialCapital, displayCurrency)}</span></div>
+                                <div>Target: <span style={{ color: '#ffffff', fontWeight: 'bold' }}>{config.targetStocks} stocks</span></div>
+                              </div>
                             </div>
                           );
                         })}
@@ -4054,6 +4392,22 @@ function App() {
                             }
                           },
                           {
+                            title: 'Initial Capital',
+                            key: 'initial_capital',
+                            render: (_, record) => {
+                              const conf = getPortfolioConfig(record.name);
+                              return <span style={{ color: '#ffffff', fontWeight: 'bold', fontFamily: 'var(--font-family-mono)' }}>{formatCurrency(conf.initialCapital, displayCurrency)}</span>;
+                            }
+                          },
+                          {
+                            title: 'Target Stocks to Hold',
+                            key: 'target_stocks',
+                            render: (_, record) => {
+                              const conf = getPortfolioConfig(record.name);
+                              return <span style={{ color: '#ffffff', fontWeight: 'bold' }}>{conf.targetStocks}</span>;
+                            }
+                          },
+                          {
                             title: 'Action',
                             key: 'portfolio_actions',
                             align: 'right',
@@ -4063,12 +4417,17 @@ function App() {
                                   type="text" 
                                   icon={<SettingOutlined />} 
                                   onClick={() => {
+                                    const conf = getPortfolioConfig(record.name);
                                     setRenameTarget(record.name);
-                                    renameForm.setFieldsValue({ name: record.name });
+                                    renameForm.setFieldsValue({ 
+                                      name: record.name,
+                                      initialCapital: conf.initialCapital,
+                                      targetStocks: conf.targetStocks
+                                    });
                                     setIsRenameModalOpen(true);
                                   }}
                                 >
-                                  Rename
+                                  Configure
                                 </Button>
                                 <Popconfirm
                                   title="Delete Portfolio"
@@ -4417,7 +4776,9 @@ function App() {
               action: 'Buy',
               currency: 'THB',
               assetType: 'Thai Stock',
-              date: dayjs()
+              date: dayjs(),
+              applyFee: true,
+              feeRate: 0.168
             }}
           >
             <Row gutter={16}>
@@ -4602,6 +4963,50 @@ function App() {
               </Col>
             </Row>
 
+            <Row gutter={16}>
+              <Col xs={24} sm={12}>
+                <Form.Item
+                  name="applyFee"
+                  valuePropName="checked"
+                  label="Apply Trading Fee"
+                >
+                  <Checkbox onChange={(e) => {
+                    if (!e.target.checked) {
+                      tradeForm.setFieldsValue({ feeRate: 0.0 });
+                    } else {
+                      tradeForm.setFieldsValue({ feeRate: 0.168 });
+                    }
+                  }}>Include transaction fee</Checkbox>
+                </Form.Item>
+              </Col>
+              
+              <Col xs={24} sm={12}>
+                <Form.Item
+                  noStyle
+                  shouldUpdate={(prevValues, currentValues) => prevValues.applyFee !== currentValues.applyFee}
+                >
+                  {({ getFieldValue }) => {
+                    const applyFee = getFieldValue('applyFee');
+                    return (
+                      <Form.Item
+                        name="feeRate"
+                        label="Trading Fee Rate (%)"
+                        rules={[{ required: applyFee, message: 'Input fee rate' }]}
+                      >
+                        <InputNumber
+                          min={0}
+                          max={100}
+                          step={0.001}
+                          disabled={!applyFee}
+                          style={{ width: '100%' }}
+                        />
+                      </Form.Item>
+                    );
+                  }}
+                </Form.Item>
+              </Col>
+            </Row>
+
             <Form.Item
               name="remark"
               label="Remarks (Notes)"
@@ -4661,9 +5066,9 @@ function App() {
           </Form>
         </Modal>
 
-        {/* MODAL 3: RENAME PORTFOLIO */}
+        {/* MODAL 3: CONFIGURE PORTFOLIO */}
         <Modal
-          title="Rename Portfolio"
+          title="Configure Portfolio"
           open={isRenameModalOpen}
           onCancel={() => setIsRenameModalOpen(false)}
           footer={null}
@@ -4675,9 +5080,9 @@ function App() {
           >
             <Form.Item
               name="name"
-              label="New Portfolio Name"
+              label="Portfolio Name"
               rules={[
-                { required: true, message: 'Please input a new portfolio name' },
+                { required: true, message: 'Please input a portfolio name' },
                 { 
                   validator: (_, value) => {
                     if (value && portfolios.includes(value.trim()) && value.trim() !== renameTarget) {
@@ -4691,11 +5096,32 @@ function App() {
               <Input placeholder="e.g. Retirement Fund, Swing Trades" />
             </Form.Item>
 
+            <Form.Item
+              name="initialCapital"
+              label="Initial Capital"
+              rules={[{ required: true, message: 'Please input initial capital' }]}
+            >
+              <InputNumber
+                min={0}
+                style={{ width: '100%' }}
+                formatter={value => `${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}
+                parser={value => value.replace(/\$\s?|(,*)/g, '')}
+              />
+            </Form.Item>
+
+            <Form.Item
+              name="targetStocks"
+              label="Amount of Stock to Hold (Target)"
+              rules={[{ required: true, message: 'Please input amount of stocks' }]}
+            >
+              <InputNumber min={1} max={500} style={{ width: '100%' }} />
+            </Form.Item>
+
             <Form.Item style={{ marginBottom: 0, textAlign: 'right' }}>
               <Space>
                 <Button onClick={() => setIsRenameModalOpen(false)}>Cancel</Button>
                 <Button type="primary" htmlType="submit" style={{ color: '#06080f', fontWeight: 'bold' }}>
-                  Rename Portfolio
+                  Save Configuration
                 </Button>
               </Space>
             </Form.Item>
