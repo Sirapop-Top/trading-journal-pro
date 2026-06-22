@@ -121,3 +121,11 @@ interface Trade {
 ### Fix: Duplicate Trade Rendering on Optimistic Update
 * **Issue:** Logging a trade caused the item to render twice until tab refresh because the optimistic React update used `trades.length + 1` for the temporary ID, colliding with the actual spreadsheet row indices.
 * **Fix:** Aligned the client-side optimistic ID offset to `trades.length + 2` to mirror Google Sheet row conventions and prevent key collision warnings.
+
+### Fix: Absolute Fees, Widescreen Modal Layout, and Unified Editing
+* **Issue:** Trading fees were handled as percentages (`feeRate`), causing inaccurate real-cost calculations and complex checkbox inputs. The "Log New Trade Entry" modal action segmented control was positioned lower in the form, and the "Edit" button only supported changing strategy/remarks, not quantities or prices.
+* **Fix:** Migrated to absolute `feeAmount` across the codebase, simplifying inputs to a direct numeric field. Rearranged the new trade modal layout to put the BUY/SELL Action control prominently at the top. Expanded the Edit Strategy modal into a full **Edit Trade Entry** dialog, allowing editing of Quantity, Price per unit, and Fee Amount alongside strategy/remarks on both PC and mobile viewports.
+
+### Fix: Recursive Header Loop & Outdated Formulas in Google Sheet
+* **Issue:** In `ensureTableStructure()`, the `"amount"` header match was checked before `"fee"`, causing `"Fee Amount"` to match `"amount"`, rename to `"Amount"`, trigger a "missing column" detection, and append a new `"Fee Amount"` column on every write. This created columns Q to AG named `"Amount"` and pushed the actual fee values to Column AH. Additionally, old rows kept using the outdated percentage-based formulas.
+* **Fix:** Reordered header sanitization checks to run `"fee"` first. Appended a **Self-Healing Cleanup Engine** that automatically moves misplaced fee values back to Column Q and deletes duplicate columns (R onwards). Integrated a **Batch Formula Repair Engine** that loops over all existing rows and rewrites their cells with correct, absolute-fee formulas (`Amount`, `Value`, `P&L`, `P&L %`).
