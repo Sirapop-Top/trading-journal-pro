@@ -1,49 +1,32 @@
 # 📖 AlphaTrader User Manual & Operation Guide
 
-Welcome to **AlphaTrader**, a dual-mode personal trading journal and portfolio analysis application designed to keep track of your financial assets, compute real-time performance using live Yahoo Finance feeds, and sync seamlessly between your offline Excel sheets and a serverless cloud database.
+Welcome to **AlphaTrader**, a serverless cloud trading journal and portfolio analysis application designed to keep track of your financial assets, compute real-time performance using live Yahoo Finance feeds, and sync seamlessly with your Google Sheets database.
 
 ---
 
 ## 📑 Table of Contents
 1. [⚙️ System Architecture Overview](#-system-architecture-overview)
-2. [🖥️ Desktop PC Mode Operations](#-desktop-pc-mode-operations)
-3. [☁️ Cloud Serverless Mode Operations (Mobile / Offline PC)](#%EF%B8%8F-cloud-serverless-mode-operations-mobile--offline-pc)
-4. [📈 Core Features Walkthrough](#-core-features-walkthrough)
+2. [☁️ Cloud Serverless Mode Operations](#%EF%B8%8F-cloud-serverless-mode-operations)
+3. [📈 Core Features Walkthrough](#-core-features-walkthrough)
    - [Log New Trade (with Ticker Verification)](#log-new-trade-with-ticker-verification)
    - [Adjusting Trade Strategy & Notes](#adjusting-trade-strategy--notes)
    - [Security Lock & Lock-out Cooldown](#security-lock--lock-out-cooldown)
    - [Advanced Analytics & Performance Metrics](#advanced-analytics--performance-metrics)
-5. [🔄 Cloud-to-Local Synchronization](#-cloud-to-local-synchronization)
-6. [🛠️ Troubleshooting & Frequently Asked Questions](#%EF%B8%8F-troubleshooting--frequently-asked-questions)
+4. [🛠️ Troubleshooting & Frequently Asked Questions](#%EF%B8%8F-troubleshooting--frequently-asked-questions)
 
 ---
 
 ## ⚙️ System Architecture Overview
 
-AlphaTrader operates in two dual modes depending on where you access it:
-
-1. **Local PC Mode:** Runs React Frontend + FastAPI Backend syncing with local `Trading Journal.xlsx` and `db.json` files.
-2. **Serverless Cloud Mode:** Runs React Frontend (hosted on GitHub Pages) + Google Sheets Backend (Google Apps Script API) for 24/7 mobile access.
-
----
-
-## 🖥️ Desktop PC Mode Operations
-
-### Prerequisites
-* Ensure **Python 3.10+** and **Node.js 18+** are installed.
-
-### Launching the Application
-1. Double-click the launcher script **`Start_AlphaTrader.bat`** in the project root folder.
-2. This launches:
-   * **FastAPI Backend** on port `8000`.
-   * **Vite React Frontend** on port `5173`.
-3. Your default web browser will automatically open to `http://localhost:5173/` inside the dashboard terminal.
+AlphaTrader operates in a purely **Serverless Cloud Mode**:
+* **Frontend:** Hosted on **GitHub Pages** (always online, free, runs entirely in your browser).
+* **Database & API:** Powered by **Google Sheets** and **Google Apps Script** (manages read/write operations for trades, portfolios, and configurations, and proxies real-time Yahoo Finance market quotes).
 
 ---
 
-## ☁️ Cloud Serverless Mode Operations (Mobile / Offline PC)
+## ☁️ Cloud Serverless Mode Operations
 
-You can access your journal 24/7 without keeping your PC running. To configure Cloud Mode:
+You can access your journal 24/7 on any device (PC, tablet, or mobile phone) without keeping any computer running.
 
 ### Step 1: Create your Google Sheet Database
 1. Go to [Google Sheets](https://sheets.google.com) and create a new blank spreadsheet.
@@ -70,8 +53,8 @@ You can access your journal 24/7 without keeping your PC running. To configure C
    * *Who has access:* `Anyone`
 5. Deploy, approve permissions (Advanced &rarr; Go to Untitled Project), and copy the **Web app URL** (`Apps Script URL`).
 
-### Step 3: Connect on Mobile
-1. Open the GitHub Pages site in your mobile browser.
+### Step 3: Connect Frontend
+1. Open your deployed GitHub Pages URL on your device.
 2. Paste the **Sheet ID** and **Apps Script URL** into the setup prompt and click **Connect**.
 
 ---
@@ -89,7 +72,7 @@ To keep calculations accurate, AlphaTrader validates symbols against Yahoo Finan
 4. Click **Verify** next to the Asset Name field:
    * **Green Check:** Verified on Yahoo Finance! The corrected ticker name is saved, and live market prices will load dynamically.
    * **Red Cross:** Invalid ticker. Checks will run again if you attempt to submit.
-   * **Offline Override:** If the verification server is unreachable, a confirmation dialog will prompt: *"Verification Unreachable. Do you want to log this trade anyway?"* Select **Log Anyway** if you are offline and certain the symbol is correct.
+   * **Offline Override:** If the verification server is unreachable, a confirmation dialog will prompt: *"Ticker Verification Unreachable. Do you want to log this trade anyway?"* Select **Log Anyway** if you are offline and certain the symbol is correct.
 
 ### Adjusting Trade Strategy & Notes
 If you change your trading model or wish to log emotional diary states after recording a transaction:
@@ -98,8 +81,8 @@ If you change your trading model or wish to log emotional diary states after rec
 3. In the **Actions** column, click the **Edit (Pencil)** icon.
 4. An **Edit Strategy** modal will open:
    * **Strategy / Decision Reason:** Select a preset trigger (e.g. `CDC Action Zone`, `Breakout`, `Support Bounce`) or type a custom strategy.
-   * **Private Notes / Diary:** Document your target exit plan, emotional status, or remarks.
-5. Click **Save Changes**. This updates `db.json`, `Trading Journal.xlsx`, and Google Sheets (if sync is enabled).
+   * **Private Notes / Diary:** Document your target exit plan, status, or remarks.
+5. Click **Save Changes**. This updates Google Sheets via the Apps Script API.
 6. Rows with a strategy or notes will display an expander icon `>` in the history table. Click it to view the full Trade Analysis.
 
 ### Security Lock & Lock-out Cooldown
@@ -123,29 +106,17 @@ Traders need metrics that help them evaluate edge. The top of the **Dashboard** 
 
 ---
 
-## 🔄 Cloud-to-Local Synchronization
-
-To merge trades you entered on your mobile phone back into your local Excel workbook:
-1. Turn on your computer and launch the app using `Start_AlphaTrader.bat`.
-2. Navigate to **Terminal Settings** &rarr; **Cloud Google Sheets & Mobile Sync**.
-3. Make sure your Sheet ID and Apps Script URL are saved.
-4. Click **Sync Google Sheet Now**.
-5. The local backend downloads all cloud entries, prevents composite signature duplicates, writes them to `db.json`, and injects computed Excel formulas (`Amount`, `Current Value`, `P&L`, `P&L %`) directly back into `Trading Journal.xlsx`.
-
----
-
 ## 🛠️ Troubleshooting & Frequently Asked Questions
 
-#### Q: How do I update my mobile app code if I modify settings?
-**A:** If you make changes to the Google Apps Script functions, you must copy the new code from `github_sheets_serverless_deployment_guide.md` &rarr; paste it into Google Apps Script console (`script.google.com`) &rarr; click **Deploy** &rarr; select **Manage deployments** &rarr; edit the active deployment and increment the version &rarr; click **Redeploy**.
+#### Q: How do I update my cloud app code if I modify settings?
+**A:** If you make changes to the Google Apps Script functions, you must copy the new code from `github_sheets_serverless_deployment_guide.md` &rarr; paste it into Google Apps Script console (`script.google.com`) &rarr; click **Save** &rarr; click **Deploy** &rarr; select **Manage deployments** &rarr; edit the active deployment and increment the version &rarr; click **Redeploy**.
 
 #### Q: The verification fails on valid tickers in Cloud Mode.
-**A:** Ensure your Apps Script URL is set. In cloud mode, browser CORS restriction blocks direct requests to Yahoo Finance. Ticker validations are proxied through Apps Script Web App. If your URL is missing or incorrect, cloud validation will fail.
+**A:** Ensure your Apps Script URL is set. Direct browser CORS restrictions block direct requests to Yahoo Finance, so validations are proxied through your Apps Script Web App. If your URL is missing or incorrect, cloud validation will fail.
 
 #### Q: I forgot my passcode. How can I reset the app?
-**A:** Since security parameters are client-side encrypted:
+**A:** Since security parameters are client-side stored:
 1. Right-click anywhere in your browser page &rarr; select **Inspect** &rarr; go to **Application** tab (Chrome/Edge) or **Storage** tab (Firefox).
 2. Expand **Local Storage** on the left &rarr; click on the app domain.
 3. Locate `alphatrader_passcode` and delete the value.
 4. Refresh the page to bypass the lock screen.
-5. In Local PC mode, you can also clear the `"app_passcode"` field from the root `db.json` file.

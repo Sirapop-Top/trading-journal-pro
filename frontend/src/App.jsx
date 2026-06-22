@@ -38,26 +38,18 @@ import {
   AreaChart, Area, PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend,
   BarChart, Bar, XAxis, YAxis, CartesianGrid, ReferenceLine
 } from 'recharts';
-import axios from 'axios';
 import dayjs from 'dayjs';
 
 const { Header, Content, Sider } = Layout;
 const { Title, Text } = Typography;
 const { Option } = Select;
 
-const API_BASE = import.meta.env.VITE_API_URL || '';
-
-// Detect if we should run in serverless Cloud Mode (e.g. on GitHub Pages)
-const isCloudMode = !window.location.hostname.match(/^(localhost|127.0.0.1|100\.\d+\.\d+\.\d+)$/) && window.location.hostname !== "";
+// Force Cloud Mode (Google Sheets Serverless DB) to always be true
+const isCloudMode = true;
 
 const getApiUrl = (endpoint) => {
   const scriptUrl = localStorage.getItem('google_apps_script_url');
-  const useCloud = isCloudMode || !window.location.hostname;
-  
-  if (useCloud) {
-    return { type: 'cloud', url: scriptUrl || '' }; // Always cloud on GitHub Pages; url may be empty
-  }
-  return { type: 'local', url: `${API_BASE}${endpoint}` }; // Routes to local FastAPI Backend
+  return { type: 'cloud', url: scriptUrl || '' };
 };
 
 // Robust RFC 4180-compliant CSV Parser that handles nested quotes, commas, and newlines
@@ -502,44 +494,25 @@ function App() {
     setIsSyncing(true);
     setCloudConnectionError(null);
     try {
-      const api = getApiUrl('/api/data');
-      if (api.type === 'cloud') {
-        // In Cloud Mode: always use the direct CSV URL as the PRIMARY source for trade data.
-        // The gviz/tq CSV endpoint has full CORS support and never redirects,
-        // so it works on ALL browsers including Safari/Brave on mobile.
-        // Apps Script is only used as a fallback to also fetch live prices.
-        const sheetId = localStorage.getItem('google_sheet_id') || googleSheetId;
-        if (!sheetId) {
-          setCloudConnectionError('No Google Sheet ID configured. Please enter your Sheet ID in the setup screen.');
-          setIsSyncing(false);
-          return;
+      const sheetId = localStorage.getItem('google_sheet_id') || googleSheetId;
+      if (!sheetId) {
+        setCloudConnectionError('No Google Sheet ID configured. Please enter your Sheet ID in the setup screen.');
+        setIsSyncing(false);
+        return;
+      }
+      // Step 1: Load trades from the guaranteed-CORS CSV endpoint
+      await fetchDirectFromGoogleSheet(sheetId);
+      // Step 2: Try to also get live prices from Apps Script (non-critical, best-effort)
+      try {
+        const scriptUrl = localStorage.getItem('google_apps_script_url');
+        if (scriptUrl) {
+          const data = await callGoogleAppsScript(`${scriptUrl}?action=getData`);
+          if (data && data.livePrices) setLivePrices(data.livePrices);
+          if (data && data.liveRates) setLiveRates(data.liveRates);
         }
-        // Step 1: Load trades from the guaranteed-CORS CSV endpoint
-        await fetchDirectFromGoogleSheet(sheetId);
-        // Step 2: Try to also get live prices from Apps Script (non-critical, best-effort)
-        try {
-          const scriptUrl = localStorage.getItem('google_apps_script_url');
-          if (scriptUrl) {
-            const data = await callGoogleAppsScript(`${scriptUrl}?action=getData`);
-            if (data && data.livePrices) setLivePrices(data.livePrices);
-            if (data && data.liveRates) setLiveRates(data.liveRates);
-          }
-        } catch (priceErr) {
-          // Live prices are optional — don't block or error if this fails
-          console.warn('Live prices from Apps Script unavailable, using WAC fallback:', priceErr);
-        }
-      } else {
-        const response = await axios.get(api.url);
-        setTrades(response.data.trades);
-        setPortfolios(response.data.portfolios);
-        setLivePrices(response.data.livePrices || {});
-        setLiveRates(response.data.liveRates || { THB: 1.0, USD: 32.69, EUR: 38.04 });
-        if (response.data.portfolioConfigs) {
-          localStorage.setItem('alphatrader_portfolio_configs', JSON.stringify(response.data.portfolioConfigs));
-        }
-        if (response.data.syncTime) {
-          setSyncTime(dayjs(response.data.syncTime).format('YYYY-MM-DD HH:mm:ss'));
-        }
+      } catch (priceErr) {
+        // Live prices are optional — don't block or error if this fails
+        console.warn('Live prices from Apps Script unavailable, using WAC fallback:', priceErr);
       }
     } catch (error) {
       console.error('Error fetching data:', error);
@@ -553,30 +526,18 @@ function App() {
   const syncMarketData = async (silent = false) => {
     if (!silent) setIsSyncing(true);
     try {
-      const api = getApiUrl('/api/sync');
-      if (api.type === 'cloud') {
-        if (!api.url) {
-          throw new Error('Google Apps Script URL is not configured in Settings.');
-        }
-        const data = await callGoogleAppsScript(`${api.url}?action=getData`);
-        setLivePrices(data.livePrices || {});
-        setLiveRates(data.liveRates || { THB: 1.0, USD: 32.69, EUR: 38.04 });
-        if (data.syncTime) {
-          setSyncTime(dayjs(data.syncTime).format('YYYY-MM-DD HH:mm:ss'));
-        }
-        if (!silent) {
-          message.success('Live market prices synced from Yahoo Finance.');
-        }
-      } else {
-        const response = await axios.post(api.url);
-        setLivePrices(response.data.livePrices || {});
-        setLiveRates(response.data.liveRates || { THB: 1.0, USD: 32.69, EUR: 38.04 });
-        if (response.data.syncTime) {
-          setSyncTime(dayjs(response.data.syncTime).format('YYYY-MM-DD HH:mm:ss'));
-        }
-        if (!silent) {
-          message.success('Live market prices & exchange rates synced from Yahoo Finance.');
-        }
+      const scriptUrl = localStorage.getItem('google_apps_script_url');
+      if (!scriptUrl) {
+        throw new Error('Google Apps Script URL is not configured in Settings.');
+      }
+      const data = await callGoogleAppsScript(`${scriptUrl}?action=getData`);
+      setLivePrices(data.livePrices || {});
+      setLiveRates(data.liveRates || { THB: 1.0, USD: 32.69, EUR: 38.04 });
+      if (data.syncTime) {
+        setSyncTime(dayjs(data.syncTime).format('YYYY-MM-DD HH:mm:ss'));
+      }
+      if (!silent) {
+        message.success('Live market prices synced from Yahoo Finance.');
       }
     } catch (error) {
       console.error('Error syncing market data:', error);
@@ -590,76 +551,19 @@ function App() {
 
   // Google Sheet Mobile Sync Helper API Functions
   const fetchGoogleSheetSettings = async () => {
-    if (isCloudMode) {
-      setGoogleSheetSyncCount(trades.length);
-      return;
-    }
-    try {
-      const response = await axios.get(`${API_BASE}/api/google-sheet-settings`);
-      setGoogleSheetId(response.data.google_sheet_id || '');
-      if (response.data.google_apps_script_url) {
-        setGoogleAppsScriptUrl(response.data.google_apps_script_url);
-        localStorage.setItem('google_apps_script_url', response.data.google_apps_script_url);
-      } else {
-        const localUrl = localStorage.getItem('google_apps_script_url') || '';
-        if (localUrl) {
-          setGoogleAppsScriptUrl(localUrl);
-          axios.post(`${API_BASE}/api/google-sheet-settings`, {
-            google_sheet_id: response.data.google_sheet_id || '',
-            google_apps_script_url: localUrl,
-            app_passcode: response.data.app_passcode || ''
-          }).catch(err => console.error("Auto-syncing script URL to backend failed:", err));
-        }
-      }
-      if (response.data.app_passcode) {
-        setAppPasscode(response.data.app_passcode);
-        localStorage.setItem('alphatrader_passcode', response.data.app_passcode);
-      } else {
-        setAppPasscode('');
-        localStorage.removeItem('alphatrader_passcode');
-      }
-      setGoogleSheetSyncCount(response.data.synced_count || 0);
-    } catch (error) {
-      console.error('Error fetching Google Sheet settings:', error);
-    }
+    setGoogleSheetSyncCount(trades.length);
   };
 
   const handleSaveGoogleSheetSettings = async () => {
     setIsSyncingSheet(true);
-    
-    // In Cloud Mode (GitHub Pages), save directly to browser localStorage and refresh trades list
-    if (isCloudMode) {
-      try {
-        localStorage.setItem('google_apps_script_url', googleAppsScriptUrl.trim());
-        localStorage.setItem('google_sheet_id', googleSheetId.trim());
-        message.success('Cloud sync settings saved to browser local storage!');
-        await fetchData(); // Fetch trades using the new Apps Script URL
-      } catch (err) {
-        console.error('Error saving local cloud settings:', err);
-        message.error('Failed to save cloud settings.');
-      } finally {
-        setIsSyncingSheet(false);
-      }
-      return;
-    }
-    
     try {
-      const response = await axios.post(`${API_BASE}/api/google-sheet-settings`, {
-        google_sheet_id: googleSheetId,
-        google_apps_script_url: googleAppsScriptUrl,
-        app_passcode: appPasscode
-      });
-      if (response.data.success) {
-        message.success('Google Sheet sync settings saved successfully.');
-        if (response.data.sync_success) {
-          message.success('Initial Google Sheets sync completed!');
-          fetchData();
-        }
-        fetchGoogleSheetSettings();
-      }
-    } catch (error) {
-      console.error('Error saving Google Sheet settings:', error);
-      message.error('Failed to save settings.');
+      localStorage.setItem('google_apps_script_url', googleAppsScriptUrl.trim());
+      localStorage.setItem('google_sheet_id', googleSheetId.trim());
+      message.success('Cloud sync settings saved to browser local storage!');
+      await fetchData(); // Fetch trades using the new Apps Script URL
+    } catch (err) {
+      console.error('Error saving local cloud settings:', err);
+      message.error('Failed to save cloud settings.');
     } finally {
       setIsSyncingSheet(false);
     }
@@ -667,29 +571,12 @@ function App() {
 
   const handleSyncGoogleSheet = async () => {
     setIsSyncingSheet(true);
-    if (isCloudMode) {
-      try {
-        await fetchData();
-        message.success('Refreshed data from cloud Google Sheets!');
-      } catch (err) {
-        console.error('Error refreshing cloud data:', err);
-        message.error('Failed to refresh data.');
-      } finally {
-        setIsSyncingSheet(false);
-      }
-      return;
-    }
-    
     try {
-      const response = await axios.post(`${API_BASE}/api/google-sheet-sync`);
-      if (response.data.success) {
-        message.success('Google Sheet trades synced successfully!');
-        fetchData();
-        fetchGoogleSheetSettings();
-      }
-    } catch (error) {
-      console.error('Error syncing Google Sheet:', error);
-      message.error(error.response?.data?.detail || 'Failed to sync Google Sheet.');
+      await fetchData();
+      message.success('Refreshed data from cloud Google Sheets!');
+    } catch (err) {
+      console.error('Error refreshing cloud data:', err);
+      message.error('Failed to refresh data.');
     } finally {
       setIsSyncingSheet(false);
     }
@@ -1228,38 +1115,30 @@ function App() {
     });
     
     try {
-      const api = getApiUrl('/api/trades');
-      let response;
-      if (api.type === 'cloud') {
-        if (!api.url) {
-          throw new Error('Apps Script URL is missing. Set it in settings to validate tickers.');
-        }
-        const result = await callGoogleAppsScript(api.url, {
-          action: 'validateTicker',
-          symbol: resolvedSymbol,
-          assetType: assetType
-        });
-        response = { data: result };
-      } else {
-        response = await axios.get(`${API_BASE}/api/validate-ticker`, {
-          params: { symbol: resolvedSymbol, asset_type: assetType }
-        });
+      const scriptUrl = localStorage.getItem('google_apps_script_url');
+      if (!scriptUrl) {
+        throw new Error('Apps Script URL is missing. Set it in settings to validate tickers.');
       }
+      const result = await callGoogleAppsScript(scriptUrl, {
+        action: 'validateTicker',
+        symbol: resolvedSymbol,
+        assetType: assetType
+      });
 
-      if (response.data.valid) {
+      if (result.valid) {
         setTickerValidation({
           status: 'success',
-          message: response.data.message,
+          message: result.message,
           checkedTicker: tickerUpper
         });
         message.success(`Ticker verified on Yahoo Finance!`);
       } else {
         setTickerValidation({
           status: 'error',
-          message: response.data.message,
+          message: result.message,
           checkedTicker: tickerUpper
         });
-        message.error(`Verification Failed: ${response.data.message}`);
+        message.error(`Verification Failed: ${result.message}`);
       }
     } catch (error) {
       console.error('Ticker validation connection failed:', error);
@@ -1281,44 +1160,36 @@ function App() {
       tradeForm.setFieldsValue({ assetName: resolvedSymbol });
     }
     const symbol = resolvedSymbol;
-    const api = getApiUrl('/api/trades');
+    const scriptUrl = localStorage.getItem('google_apps_script_url');
     
     // Validate ticker before adding trade
     if (tickerValidation.status !== 'success' || tickerValidation.checkedTicker !== symbol) {
       setIsSyncing(true);
       const hideMsg = message.loading('Validating ticker on Yahoo Finance...', 0);
       try {
-        let response;
-        if (api.type === 'cloud') {
-          if (!api.url) {
-            throw new Error('Apps Script URL is missing. Cannot validate ticker.');
-          }
-          const result = await callGoogleAppsScript(api.url, {
-            action: 'validateTicker',
-            symbol: symbol,
-            assetType: assetType
-          });
-          response = { data: result };
-        } else {
-          response = await axios.get(`${API_BASE}/api/validate-ticker`, {
-            params: { symbol: symbol, asset_type: assetType }
-          });
+        if (!scriptUrl) {
+          throw new Error('Apps Script URL is missing. Cannot validate ticker.');
         }
+        const result = await callGoogleAppsScript(scriptUrl, {
+          action: 'validateTicker',
+          symbol: symbol,
+          assetType: assetType
+        });
         hideMsg();
         setIsSyncing(false);
         
-        if (!response.data.valid) {
+        if (!result.valid) {
           setTickerValidation({
             status: 'error',
-            message: response.data.message,
+            message: result.message,
             checkedTicker: symbol
           });
-          message.error(`Verification Failed: ${response.data.message}`);
+          message.error(`Verification Failed: ${result.message}`);
           return; // Stop form submission
         } else {
           setTickerValidation({
             status: 'success',
-            message: response.data.message,
+            message: result.message,
             checkedTicker: symbol
           });
         }
@@ -1360,7 +1231,7 @@ function App() {
       const formattedDate = values.date.format('YYYY-MM-DD');
       
       const newTrade = {
-        id: api.type === 'cloud' ? (trades.length + 2).toString() : (trades.length + 1).toString(),
+        id: (trades.length + 2).toString(),
         date: formattedDate,
         portfolio: values.portfolio,
         assetName: symbol,
@@ -1374,49 +1245,39 @@ function App() {
         feeRate: values.applyFee ? (parseFloat(values.feeRate) || 0.0) : 0.0
       };
 
-      if (api.type === 'cloud') {
-        const payload = {
-          action: 'addTrade',
-          trade: newTrade
-        };
-        await callGoogleAppsScript(api.url, payload);
-        message.success(`Trade for ${newTrade.assetName} logged successfully to Google Sheets.`);
-        setIsTradeModalOpen(false);
-        tradeForm.resetFields();
-        setTickerValidation({ status: 'idle', message: '', checkedTicker: '' });
-        
-        // Auto-save the portfolio mapping for this asset in Cloud Mode
-        try {
-          const customMappings = JSON.parse(localStorage.getItem('alphatrader_portfolio_mappings') || '{}');
-          customMappings[newTrade.assetName] = newTrade.portfolio;
-          localStorage.setItem('alphatrader_portfolio_mappings', JSON.stringify(customMappings));
+      const payload = {
+        action: 'addTrade',
+        trade: newTrade
+      };
+      await callGoogleAppsScript(scriptUrl, payload);
+      message.success(`Trade for ${newTrade.assetName} logged successfully to Google Sheets.`);
+      setIsTradeModalOpen(false);
+      tradeForm.resetFields();
+      setTickerValidation({ status: 'idle', message: '', checkedTicker: '' });
+      
+      // Auto-save the portfolio mapping for this asset in Cloud Mode
+      try {
+        const customMappings = JSON.parse(localStorage.getItem('alphatrader_portfolio_mappings') || '{}');
+        customMappings[newTrade.assetName] = newTrade.portfolio;
+        localStorage.setItem('alphatrader_portfolio_mappings', JSON.stringify(customMappings));
 
-          // Also sync mapping via Apps Script transferPosition action in background to keep sheet updated
-          if (api.url) {
-            callGoogleAppsScript(api.url, {
-              action: "transferPosition",
-              assetName: newTrade.assetName,
-              targetPortfolio: newTrade.portfolio
-            }).catch(e => console.error("Error background syncing mapping:", e));
-          }
-        } catch (e) {
-          console.error("Error saving portfolio mapping:", e);
+        // Also sync mapping via Apps Script transferPosition action in background to keep sheet updated
+        if (scriptUrl) {
+          callGoogleAppsScript(scriptUrl, {
+            action: "transferPosition",
+            assetName: newTrade.assetName,
+            targetPortfolio: newTrade.portfolio
+          }).catch(e => console.error("Error background syncing mapping:", e));
         }
-
-        setTrades(prev => [...prev, newTrade]);
-        fetchData(); // Trigger full refresh to sync
-      } else {
-        const response = await axios.post(api.url, newTrade);
-        message.success(`Trade for ${newTrade.assetName} logged successfully.`);
-        setIsTradeModalOpen(false);
-        tradeForm.resetFields();
-        setTickerValidation({ status: 'idle', message: '', checkedTicker: '' });
-        setTrades(prev => [...prev, response.data]);
-        syncMarketData(true);
+      } catch (e) {
+        console.error("Error saving portfolio mapping:", e);
       }
+
+      setTrades(prev => [...prev, newTrade]);
+      fetchData(); // Trigger full refresh to sync
     } catch (error) {
       console.error('Error adding trade:', error);
-      message.error(error.response?.data?.detail || 'Failed to log trade in database.');
+      message.error(error.message || 'Failed to log trade in database.');
     } finally {
       setIsSyncing(false);
     }
@@ -1426,20 +1287,14 @@ function App() {
   const handleDeleteTrade = async (tradeId) => {
     setIsSyncing(true);
     try {
-      const api = getApiUrl(`/api/trades/${tradeId}`);
-      if (api.type === 'cloud') {
-        const payload = {
-          action: 'deleteTrade',
-          tradeId: tradeId
-        };
-        await callGoogleAppsScript(api.url, payload);
-        setTrades(prev => prev.filter(t => t.id !== tradeId));
-        message.success('Trade deleted from logs.');
-      } else {
-        await axios.delete(api.url);
-        setTrades(prev => prev.filter(t => t.id !== tradeId));
-        message.success('Trade deleted from logs.');
-      }
+      const scriptUrl = localStorage.getItem('google_apps_script_url');
+      const payload = {
+        action: 'deleteTrade',
+        tradeId: tradeId
+      };
+      await callGoogleAppsScript(scriptUrl, payload);
+      setTrades(prev => prev.filter(t => t.id !== tradeId));
+      message.success('Trade deleted from logs.');
     } catch (error) {
       console.error('Error deleting trade:', error);
       message.error('Failed to delete trade.');
@@ -1452,7 +1307,7 @@ function App() {
     if (!editingTrade) return;
     setIsSyncing(true);
     try {
-      const api = getApiUrl(`/api/trades/${editingTrade.id}/strategy`);
+      const scriptUrl = localStorage.getItem('google_apps_script_url');
       const finalWhy = values.why === 'Other' ? (values.customWhy || '') : values.why;
       
       const updatedData = {
@@ -1460,36 +1315,25 @@ function App() {
         remark: values.remark || ''
       };
       
-      if (api.type === 'cloud') {
-        if (!api.url) {
-          throw new Error('Apps Script URL is missing in Cloud Mode.');
-        }
-        await callGoogleAppsScript(api.url, {
-          action: "updateTradeStrategy",
-          tradeId: editingTrade.id,
-          why: updatedData.why,
-          remark: updatedData.remark
-        });
-        message.success(`Trade strategy updated successfully on Google Sheets.`);
-        setTrades(prev => prev.map(t => t.id === editingTrade.id ? { ...t, ...updatedData } : t));
-        setIsEditStrategyModalOpen(false);
-        setEditingTrade(null);
-        setIsCustomStrategy(false);
-        editStrategyForm.resetFields();
-        fetchData();
-      } else {
-        const response = await axios.put(api.url, updatedData);
-        message.success(`Trade strategy updated successfully.`);
-        setIsEditStrategyModalOpen(false);
-        setEditingTrade(null);
-        setIsCustomStrategy(false);
-        editStrategyForm.resetFields();
-        setTrades(prev => prev.map(t => t.id === response.data.id ? response.data : t));
-        syncMarketData(true);
+      if (!scriptUrl) {
+        throw new Error('Apps Script URL is missing in Cloud Mode.');
       }
+      await callGoogleAppsScript(scriptUrl, {
+        action: "updateTradeStrategy",
+        tradeId: editingTrade.id,
+        why: updatedData.why,
+        remark: updatedData.remark
+      });
+      message.success(`Trade strategy updated successfully on Google Sheets.`);
+      setTrades(prev => prev.map(t => t.id === editingTrade.id ? { ...t, ...updatedData } : t));
+      setIsEditStrategyModalOpen(false);
+      setEditingTrade(null);
+      setIsCustomStrategy(false);
+      editStrategyForm.resetFields();
+      fetchData();
     } catch (error) {
       console.error('Error updating trade strategy:', error);
-      message.error(error.response?.data?.detail || 'Failed to update trade strategy.');
+      message.error(error.message || 'Failed to update trade strategy.');
     } finally {
       setIsSyncing(false);
     }
@@ -1498,133 +1342,108 @@ function App() {
   // Create new portfolio
   const handleAddPortfolio = async (values) => {
     try {
-      const api = getApiUrl('/api/portfolios');
-      if (api.type === 'cloud') {
-        const name = values.name.trim();
-        // Save empty custom portfolio to localStorage in Cloud Mode
-        const customPortfolios = JSON.parse(localStorage.getItem('alphatrader_custom_portfolios') || '[]');
-        if (!customPortfolios.includes(name)) {
-          customPortfolios.push(name);
-          localStorage.setItem('alphatrader_custom_portfolios', JSON.stringify(customPortfolios));
-        }
-        setPortfolios(prev => {
-          if (!prev.includes(name)) {
-            return [...prev, name];
-          }
-          return prev;
-        });
-
-        // Sync configs to localStorage in Cloud Mode
-        const configs = JSON.parse(localStorage.getItem('alphatrader_portfolio_configs') || '{}');
-        configs[name] = {
-          initialCapital: Number(values.initialCapital) || 2000000,
-          targetStocks: Number(values.targetStocks) || 50
-        };
-        localStorage.setItem('alphatrader_portfolio_configs', JSON.stringify(configs));
-
-        // Sync with Google Sheet Apps Script in the background
-        if (api.url) {
-          try {
-            await callGoogleAppsScript(api.url, {
-              action: "addPortfolio",
-              name: name
-            });
-            await callGoogleAppsScript(api.url, {
-              action: "updatePortfolioConfig",
-              name: name,
-              initialCapital: Number(values.initialCapital) || 2000000,
-              targetStocks: Number(values.targetStocks) || 50
-            });
-          } catch (cloudErr) {
-            console.error("Error syncing addPortfolio to cloud:", cloudErr);
-          }
-        }
-
-        message.success(`Portfolio "${name}" created.`);
-        setIsPortfolioModalOpen(false);
-        portfolioForm.resetFields();
-      } else {
-        const response = await axios.post(api.url, { 
-          name: values.name,
-          initialCapital: Number(values.initialCapital) || 2000000,
-          targetStocks: Number(values.targetStocks) || 50
-        });
-        setPortfolios(response.data.portfolios);
-        
-        // Refetch to refresh configurations mapping locally
-        fetchData();
-        
-        message.success(`Portfolio "${values.name}" created.`);
-        setIsPortfolioModalOpen(false);
-        portfolioForm.resetFields();
+      const scriptUrl = localStorage.getItem('google_apps_script_url');
+      const name = values.name.trim();
+      // Save empty custom portfolio to localStorage in Cloud Mode
+      const customPortfolios = JSON.parse(localStorage.getItem('alphatrader_custom_portfolios') || '[]');
+      if (!customPortfolios.includes(name)) {
+        customPortfolios.push(name);
+        localStorage.setItem('alphatrader_custom_portfolios', JSON.stringify(customPortfolios));
       }
+      setPortfolios(prev => {
+        if (!prev.includes(name)) {
+          return [...prev, name];
+        }
+        return prev;
+      });
+
+      // Sync configs to localStorage in Cloud Mode
+      const configs = JSON.parse(localStorage.getItem('alphatrader_portfolio_configs') || '{}');
+      configs[name] = {
+        initialCapital: Number(values.initialCapital) || 2000000,
+        targetStocks: Number(values.targetStocks) || 50
+      };
+      localStorage.setItem('alphatrader_portfolio_configs', JSON.stringify(configs));
+
+      // Sync with Google Sheet Apps Script in the background
+      if (scriptUrl) {
+        try {
+          await callGoogleAppsScript(scriptUrl, {
+            action: "addPortfolio",
+            name: name
+          });
+          await callGoogleAppsScript(scriptUrl, {
+            action: "updatePortfolioConfig",
+            name: name,
+            initialCapital: Number(values.initialCapital) || 2000000,
+            targetStocks: Number(values.targetStocks) || 50
+          });
+        } catch (cloudErr) {
+          console.error("Error syncing addPortfolio to cloud:", cloudErr);
+        }
+      }
+
+      message.success(`Portfolio "${name}" created.`);
+      setIsPortfolioModalOpen(false);
+      portfolioForm.resetFields();
     } catch (error) {
       console.error('Error creating portfolio:', error);
-      message.error(error.response?.data?.detail || 'Failed to create portfolio.');
+      message.error(error.message || 'Failed to create portfolio.');
     }
   };
 
   // Delete portfolio
   const handleDeletePortfolio = async (portfolioName) => {
     try {
-      const api = getApiUrl(`/api/portfolios/${portfolioName}`);
-      if (api.type === 'cloud') {
-        // Validation: check if portfolio has any active trades in Cloud Mode
-        const hasTrades = trades.some(t => t.portfolio === portfolioName);
-        if (hasTrades) {
-          message.error("Cannot delete portfolio with existing trades. Please reassign or delete the trades first.");
-          return;
-        }
-
-        // Delete from custom portfolios in localStorage
-        const customPortfolios = JSON.parse(localStorage.getItem('alphatrader_custom_portfolios') || '[]');
-        const updatedCustomPortfolios = customPortfolios.filter(p => p !== portfolioName);
-        localStorage.setItem('alphatrader_custom_portfolios', JSON.stringify(updatedCustomPortfolios));
-
-        // Delete custom mapping overrides for this portfolio
-        const customMappings = JSON.parse(localStorage.getItem('alphatrader_portfolio_mappings') || '{}');
-        let changed = false;
-        for (const asset in customMappings) {
-          if (customMappings[asset] === portfolioName) {
-            delete customMappings[asset];
-            changed = true;
-          }
-        }
-        if (changed) {
-          localStorage.setItem('alphatrader_portfolio_mappings', JSON.stringify(customMappings));
-        }
-
-        // Update active selection and portfolios list in state
-        setPortfolios(prev => prev.filter(p => p !== portfolioName));
-        if (activePortfolio === portfolioName) {
-          setActivePortfolio('All Portfolios');
-        }
-
-        // Sync with Google Sheet Apps Script in the background
-        if (api.url) {
-          try {
-            await callGoogleAppsScript(api.url, {
-              action: "deletePortfolio",
-              portfolioName: portfolioName
-            });
-          } catch (cloudErr) {
-            console.error("Error syncing deletePortfolio to cloud:", cloudErr);
-          }
-        }
-
-        message.success(`Portfolio "${portfolioName}" deleted.`);
-        await fetchData();
-      } else {
-        const response = await axios.delete(`${API_BASE}/api/portfolios/${portfolioName}`);
-        setPortfolios(response.data.portfolios);
-        if (activePortfolio === portfolioName) {
-          setActivePortfolio('All Portfolios');
-        }
-        message.success(`Portfolio "${portfolioName}" deleted.`);
+      const scriptUrl = localStorage.getItem('google_apps_script_url');
+      // Validation: check if portfolio has any active trades in Cloud Mode
+      const hasTrades = trades.some(t => t.portfolio === portfolioName);
+      if (hasTrades) {
+        message.error("Cannot delete portfolio with existing trades. Please reassign or delete the trades first.");
+        return;
       }
+
+      // Delete from custom portfolios in localStorage
+      const customPortfolios = JSON.parse(localStorage.getItem('alphatrader_custom_portfolios') || '[]');
+      const updatedCustomPortfolios = customPortfolios.filter(p => p !== portfolioName);
+      localStorage.setItem('alphatrader_custom_portfolios', JSON.stringify(updatedCustomPortfolios));
+
+      // Delete custom mapping overrides for this portfolio
+      const customMappings = JSON.parse(localStorage.getItem('alphatrader_portfolio_mappings') || '{}');
+      let changed = false;
+      for (const asset in customMappings) {
+        if (customMappings[asset] === portfolioName) {
+          delete customMappings[asset];
+          changed = true;
+        }
+      }
+      if (changed) {
+        localStorage.setItem('alphatrader_portfolio_mappings', JSON.stringify(customMappings));
+      }
+
+      // Update active selection and portfolios list in state
+      setPortfolios(prev => prev.filter(p => p !== portfolioName));
+      if (activePortfolio === portfolioName) {
+        setActivePortfolio('All Portfolios');
+      }
+
+      // Sync with Google Sheet Apps Script in the background
+      if (scriptUrl) {
+        try {
+          await callGoogleAppsScript(scriptUrl, {
+            action: "deletePortfolio",
+            portfolioName: portfolioName
+          });
+        } catch (cloudErr) {
+          console.error("Error syncing deletePortfolio to cloud:", cloudErr);
+        }
+      }
+
+      message.success(`Portfolio "${portfolioName}" deleted.`);
+      await fetchData();
     } catch (error) {
       console.error('Error deleting portfolio:', error);
-      message.error(error.response?.data?.detail || 'Failed to delete portfolio.');
+      message.error(error.message || 'Failed to delete portfolio.');
     }
   };
 
@@ -1644,103 +1463,69 @@ function App() {
       }
       localStorage.setItem('alphatrader_portfolio_configs', JSON.stringify(configs));
 
-      const api = getApiUrl('/api/portfolios/rename');
-      if (api.type === 'cloud') {
-        // Sync with Google Sheet Apps Script in the background
-        if (api.url) {
-          try {
-            await callGoogleAppsScript(api.url, {
-              action: "updatePortfolioConfig",
-              name: oldName,
-              initialCapital: initialCapital,
-              targetStocks: targetStocks
-            });
-            if (oldName !== newName) {
-              await callGoogleAppsScript(api.url, {
-                action: "renamePortfolio",
-                oldName: oldName,
-                newName: newName
-              });
-              await callGoogleAppsScript(api.url, {
-                action: "updatePortfolioConfig",
-                name: newName,
-                initialCapital: initialCapital,
-                targetStocks: targetStocks
-              });
-            }
-          } catch (cloudErr) {
-            console.error("Error syncing configs to cloud:", cloudErr);
-          }
-        }
-
-        if (oldName !== newName) {
-          // Update custom portfolios in localStorage
-          const customPortfolios = JSON.parse(localStorage.getItem('alphatrader_custom_portfolios') || '[]');
-          const updatedCustomPortfolios = customPortfolios.map(p => p === oldName ? newName : p);
-          localStorage.setItem('alphatrader_custom_portfolios', JSON.stringify(updatedCustomPortfolios));
-
-          // Update custom mappings in localStorage
-          const customMappings = JSON.parse(localStorage.getItem('alphatrader_portfolio_mappings') || '{}');
-          let changed = false;
-          for (const asset in customMappings) {
-            if (customMappings[asset] === oldName) {
-              customMappings[asset] = newName;
-              changed = true;
-            }
-          }
-          if (changed) {
-            localStorage.setItem('alphatrader_portfolio_mappings', JSON.stringify(customMappings));
-          }
-
-          // Update state
-          setPortfolios(prev => prev.map(p => p === oldName ? newName : p));
-          if (activePortfolio === oldName) {
-            setActivePortfolio(newName);
-          }
-          message.success(`Portfolio renamed successfully to "${newName}".`);
-        } else {
-          message.success(`Portfolio "${newName}" configuration updated.`);
-        }
-
-        setIsRenameModalOpen(false);
-        renameForm.resetFields();
-        await fetchData();
-      } else {
-        // Local Mode
-        await axios.put(`${API_BASE}/api/portfolios/config`, {
-          name: oldName,
-          initialCapital: initialCapital,
-          targetStocks: targetStocks
-        });
-        
-        if (oldName !== newName) {
-          const response = await axios.put(`${API_BASE}/api/portfolios/rename`, {
-            oldName: oldName,
-            newName: newName
-          });
-          setPortfolios(response.data.portfolios);
-          
-          await axios.put(`${API_BASE}/api/portfolios/config`, {
-            name: newName,
+      const scriptUrl = localStorage.getItem('google_apps_script_url');
+      // Sync with Google Sheet Apps Script in the background
+      if (scriptUrl) {
+        try {
+          await callGoogleAppsScript(scriptUrl, {
+            action: "updatePortfolioConfig",
+            name: oldName,
             initialCapital: initialCapital,
             targetStocks: targetStocks
           });
-          
-          if (activePortfolio === oldName) {
-            setActivePortfolio(newName);
+          if (oldName !== newName) {
+            await callGoogleAppsScript(scriptUrl, {
+              action: "renamePortfolio",
+              oldName: oldName,
+              newName: newName
+            });
+            await callGoogleAppsScript(scriptUrl, {
+              action: "updatePortfolioConfig",
+              name: newName,
+              initialCapital: initialCapital,
+              targetStocks: targetStocks
+            });
           }
-          message.success(`Portfolio renamed successfully to "${newName}".`);
-        } else {
-          message.success(`Portfolio "${newName}" configuration updated.`);
+        } catch (cloudErr) {
+          console.error("Error syncing configs to cloud:", cloudErr);
         }
-        
-        setIsRenameModalOpen(false);
-        renameForm.resetFields();
-        await fetchData();
       }
+
+      if (oldName !== newName) {
+        // Update custom portfolios in localStorage
+        const customPortfolios = JSON.parse(localStorage.getItem('alphatrader_custom_portfolios') || '[]');
+        const updatedCustomPortfolios = customPortfolios.map(p => p === oldName ? newName : p);
+        localStorage.setItem('alphatrader_custom_portfolios', JSON.stringify(updatedCustomPortfolios));
+
+        // Update custom mappings in localStorage
+        const customMappings = JSON.parse(localStorage.getItem('alphatrader_portfolio_mappings') || '{}');
+        let changed = false;
+        for (const asset in customMappings) {
+          if (customMappings[asset] === oldName) {
+            customMappings[asset] = newName;
+            changed = true;
+          }
+        }
+        if (changed) {
+          localStorage.setItem('alphatrader_portfolio_mappings', JSON.stringify(customMappings));
+        }
+
+        // Update state
+        setPortfolios(prev => prev.map(p => p === oldName ? newName : p));
+        if (activePortfolio === oldName) {
+          setActivePortfolio(newName);
+        }
+        message.success(`Portfolio renamed successfully to "${newName}".`);
+      } else {
+        message.success(`Portfolio "${newName}" configuration updated.`);
+      }
+
+      setIsRenameModalOpen(false);
+      renameForm.resetFields();
+      await fetchData();
     } catch (error) {
       console.error('Error configuring portfolio:', error);
-      message.error(error.response?.data?.detail || 'Failed to configure portfolio.');
+      message.error(error.message || 'Failed to configure portfolio.');
     }
   };
 
@@ -1749,38 +1534,26 @@ function App() {
     if (!editingTrade) return;
     setIsSyncing(true);
     try {
-      const api = getApiUrl(`/api/trades/${editingTrade.id}/transfer`);
+      const scriptUrl = localStorage.getItem('google_apps_script_url');
       const targetPortfolio = values.targetPortfolio;
       
-      if (api.type === 'cloud') {
-        if (!api.url) {
-          throw new Error('Apps Script URL is missing in Cloud Mode.');
-        }
-        await callGoogleAppsScript(api.url, {
-          action: "updateTradePortfolio",
-          tradeId: editingTrade.id,
-          targetPortfolio: targetPortfolio
-        });
-        message.success(`Trade transferred to '${targetPortfolio}' successfully on Google Sheets.`);
-        setTrades(prev => prev.map(t => t.id === editingTrade.id ? { ...t, portfolio: targetPortfolio } : t));
-        setIsTransferModalOpen(false);
-        setEditingTrade(null);
-        transferForm.resetFields();
-        fetchData();
-      } else {
-        const response = await axios.put(api.url, {
-          targetPortfolio: targetPortfolio
-        });
-        message.success(`Trade transferred successfully.`);
-        setIsTransferModalOpen(false);
-        setEditingTrade(null);
-        transferForm.resetFields();
-        setTrades(prev => prev.map(t => t.id === editingTrade.id ? { ...t, portfolio: targetPortfolio } : t));
-        syncMarketData(true);
+      if (!scriptUrl) {
+        throw new Error('Apps Script URL is missing in Cloud Mode.');
       }
+      await callGoogleAppsScript(scriptUrl, {
+        action: "updateTradePortfolio",
+        tradeId: editingTrade.id,
+        targetPortfolio: targetPortfolio
+      });
+      message.success(`Trade transferred to '${targetPortfolio}' successfully on Google Sheets.`);
+      setTrades(prev => prev.map(t => t.id === editingTrade.id ? { ...t, portfolio: targetPortfolio } : t));
+      setIsTransferModalOpen(false);
+      setEditingTrade(null);
+      transferForm.resetFields();
+      fetchData();
     } catch (error) {
       console.error('Error transferring trade:', error);
-      message.error(error.response?.data?.detail || 'Failed to transfer trade.');
+      message.error(error.message || 'Failed to transfer trade.');
     } finally {
       setIsSyncing(false);
     }
@@ -4685,13 +4458,6 @@ function App() {
                                 setAppPasscode('');
                                 localStorage.removeItem('alphatrader_passcode');
                                 message.success('Passcode lock disabled.');
-                                if (!isCloudMode) {
-                                  axios.post(`${API_BASE}/api/google-sheet-settings`, {
-                                    google_sheet_id: googleSheetId,
-                                    google_apps_script_url: googleAppsScriptUrl,
-                                    app_passcode: ''
-                                  }).catch(err => console.error("Syncing disabled passcode failed:", err));
-                                }
                               } else {
                                 message.info('Please enter a passcode below to enable lock.');
                               }
@@ -4743,17 +4509,6 @@ function App() {
                             onClick={async () => {
                               localStorage.setItem('alphatrader_passcode', appPasscode);
                               localStorage.setItem('alphatrader_autolock', autoLockMinutes.toString());
-                              if (!isCloudMode) {
-                                try {
-                                  await axios.post(`${API_BASE}/api/google-sheet-settings`, {
-                                    google_sheet_id: googleSheetId,
-                                    google_apps_script_url: googleAppsScriptUrl,
-                                    app_passcode: appPasscode
-                                  });
-                                } catch (e) {
-                                  console.error("Failed to sync passcode to backend:", e);
-                                }
-                              }
                               message.success('Security settings saved successfully!');
                             }} 
                             style={{ color: '#06080f', fontWeight: 'bold' }}

@@ -1,13 +1,12 @@
 # 📱 Serverless AlphaTrader Deployment Guide (GitHub Pages + Google Sheets)
 
-This guide shows you how to deploy AlphaTrader **completely serverless** (100% free, running 24/7 in the cloud with no PC running, and loading instantly on your mobile phone without any cold-start delay).
+This guide shows you how to deploy AlphaTrader **completely serverless** (100% free, running 24/7 in the cloud, and loading instantly on any device without any cold-start delay).
 
 ---
 
 ## 🏗️ How It Works
-* **Frontend:** Hosted on **GitHub Pages** (always online, free, runs entirely in your mobile browser).
+* **Frontend:** Hosted on **GitHub Pages** (always online, free, runs on any device browser).
 * **API & Database:** Hosted on **Google Sheets** using **Google Apps Script** (always online, free, reads/writes your trades, and fetches live prices from Yahoo Finance).
-* **Local PC Sync:** When you turn on your PC and start the local app, it downloads new trades from Google Sheets and automatically updates your local `Trading Journal.xlsx` file.
 
 ---
 
@@ -66,22 +65,11 @@ Once the code is pushed, GitHub will automatically build your frontend using Git
 
 ---
 
-### Step 4: Open and Connect on Mobile
-1. Open the **GitHub Pages URL** on your mobile phone web browser.
+### Step 4: Open and Connect on Your Device
+1. Open the **GitHub Pages URL** on your phone or PC web browser.
 2. The app will open and show a setup prompt: **"Welcome to AlphaTrader Mobile! Please enter your Google Apps Script URL."**
 3. Paste the **Apps Script URL** (from Step 1) and click **Connect**.
 4. The app will instantly sync with your Google Sheet and fetch live stock prices! Save this page to your mobile home screen for quick access.
-
----
-
-### Step 5: Sync to your PC Excel File
-1. Open the local AlphaTrader app on your PC by running `Start_AlphaTrader.bat`.
-2. Go to the **Settings** tab.
-3. In the **Cloud Google Sheets & Mobile Sync** card, paste:
-   * **Google Sheet ID (Read):** Your Sheet ID from Step 1.
-   * **Apps Script URL (Write):** Your Apps Script URL from Step 1.
-4. Click **Save Settings & Sync**.
-5. Your local `Trading Journal.xlsx` file is now fully integrated and will auto-download all mobile entries on startup!
 
 ---
 
