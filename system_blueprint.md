@@ -76,7 +76,7 @@ interface Trade {
   priceUnit: number;   // Unit cost in base currency
   why: string;         // Strategic reason / signal (e.g. "CDC Action Zone")
   remark: string;      // Optional comments or notes
-  feeRate: number;     // Optional transaction fee rate percentage (e.g. 0.168)
+  feeAmount: number;   // Optional transaction fee amount (e.g. 50.0)
 }
 ```
 
@@ -97,7 +97,7 @@ interface Trade {
 * **Col 14 (N):** `Why (Decision Reason)`
 * **Col 15 (O):** `Remark`
 * **Col 16 (P):** `Portfolio`
-* **Col 17 (Q):** `Fee Rate (%)`
+* **Col 17 (Q):** `Fee Amount`
 
 ---
 

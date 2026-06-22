@@ -117,6 +117,9 @@ function doPost(e) {
     } else if (action === "updateTradeStrategy") {
       return ContentService.createTextOutput(JSON.stringify(updateTradeStrategy(contents.tradeId, contents.why, contents.remark)))
         .setMimeType(ContentService.MimeType.JSON);
+    } else if (action === "editTrade") {
+      return ContentService.createTextOutput(JSON.stringify(editTrade(contents.tradeId, contents.quantity, contents.priceUnit, contents.feeAmount, contents.why, contents.remark)))
+        .setMimeType(ContentService.MimeType.JSON);
     } else if (action === "updateTradePortfolio") {
       return ContentService.createTextOutput(JSON.stringify(updateTradePortfolio(contents.tradeId, contents.targetPortfolio)))
         .setMimeType(ContentService.MimeType.JSON);
@@ -139,7 +142,7 @@ var JOURNAL_HEADERS = [
   "Timestamp", "Date", "Asset Name", "Asset Type", "Currency", 
   "Action", "Quantity", "Price/Unit", "Amount", "Current Price", 
   "Current Value", "P&L", "P&L %", "Why (Decision Reason)", 
-  "Remark", "Portfolio", "Fee Rate (%)"
+  "Remark", "Portfolio", "Fee Amount"
 ];
 
 var PORTFOLIOS_HEADERS = [
@@ -203,7 +206,7 @@ function ensureTableStructure() {
         } else if (hLower.indexOf("p&l") !== -1) {
           cleanH = "P&L";
         } else if (hLower.indexOf("fee") !== -1) {
-          cleanH = "Fee Rate (%)";
+          cleanH = "Fee Amount";
         } else if (hLower.indexOf("why") !== -1 || hLower.indexOf("decision") !== -1 || hLower.indexOf("reason") !== -1) {
           cleanH = "Why (Decision Reason)";
         } else if (hLower.indexOf("remark") !== -1 || hLower.indexOf("note") !== -1) {
@@ -350,7 +353,7 @@ function getDashboardData() {
   var whyIdx = findColIdx(["why", "decision", "reason"]);
   var remarkIdx = findColIdx(["remark", "note"]);
   var portfolioIdx = findColIdx(["portfolio", "port"]);
-  var feeRateIdx = findColIdx(["fee rate", "fee_rate", "fee %", "fee", "fee_pct"]);
+  var feeAmountIdx = findColIdx(["fee amount", "fee_amount", "fee"]);
   
   for (var i = 1; i < rows.length; i++) {
     var row = rows[i];
@@ -388,11 +391,11 @@ function getDashboardData() {
     var price = priceUnitIdx !== -1 ? parseFloat(row[priceUnitIdx]) : 0.0;
     if (isNaN(price)) price = 0.0;
     
-    var feeRate = 0.0;
-    if (feeRateIdx !== -1 && row[feeRateIdx]) {
+    var feeAmount = 0.0;
+    if (feeAmountIdx !== -1 && row[feeAmountIdx]) {
       try {
-        var rawFee = row[feeRateIdx].toString().replace("%", "").trim();
-        feeRate = parseFloat(rawFee) || 0.0;
+        var rawFee = row[feeAmountIdx].toString().replace("%", "").trim();
+        feeAmount = parseFloat(rawFee) || 0.0;
       } catch (e) {}
     }
     
@@ -408,7 +411,7 @@ function getDashboardData() {
       priceUnit: price,
       why: whyIdx !== -1 && row[whyIdx] ? row[whyIdx].toString().trim() : "",
       remark: remarkIdx !== -1 && row[remarkIdx] ? row[remarkIdx].toString().trim() : "",
-      feeRate: feeRate
+      feeAmount: feeAmount
     };
     
     trades.push(trade);
@@ -564,7 +567,7 @@ function addTrade(trade) {
   var whyIdx = getIndex(["why (decision reason)", "why", "decision", "reason"]);
   var remarkIdx = getIndex(["remark", "note"]);
   var portfolioIdx = getIndex(["portfolio", "port"]);
-  var feeRateIdx = getIndex(["fee rate", "fee_rate", "fee %", "fee", "fee_pct"]);
+  var feeAmountIdx = getIndex(["fee amount", "fee_amount", "fee"]);
   
   var amountIdx = getIndex(["amount"]);
   var curPriceIdx = getIndex(["current price"]);
@@ -592,7 +595,7 @@ function addTrade(trade) {
   if (whyIdx !== -1) rowValues[whyIdx] = sanitizeString(trade.why);
   if (remarkIdx !== -1) rowValues[remarkIdx] = sanitizeString(trade.remark);
   if (portfolioIdx !== -1) rowValues[portfolioIdx] = trade.portfolio || "Main Trading";
-  if (feeRateIdx !== -1) rowValues[feeRateIdx] = parseFloat(trade.feeRate) || 0.0;
+  if (feeAmountIdx !== -1) rowValues[feeAmountIdx] = parseFloat(trade.feeAmount) || 0.0;
   
   function getColLetter(colIdx) {
     if (colIdx === -1) return "";
@@ -610,14 +613,15 @@ function addTrade(trade) {
   var priceLetter = getColLetter(priceUnitIdx);
   var actionLetter = getColLetter(actionIdx);
   var curPriceLetter = getColLetter(curPriceIdx);
+  var curValueLetter = getColLetter(curValueIdx);
   var amountLetter = getColLetter(amountIdx);
   var pnlLetter = getColLetter(pnlIdx);
-  var feeLetter = getColLetter(feeRateIdx);
+  var feeLetter = getColLetter(feeAmountIdx);
   
   // Set calculation formulas
   if (amountIdx !== -1 && qtyLetter && priceLetter) {
     if (feeLetter) {
-      rowValues[amountIdx] = '=IF(' + actionLetter + newRowIdx + '="Buy",' + qtyLetter + newRowIdx + '*' + priceLetter + newRowIdx + '*(1+' + feeLetter + newRowIdx + '/100),' + qtyLetter + newRowIdx + '*' + priceLetter + newRowIdx + '*(1-' + feeLetter + newRowIdx + '/100))';
+      rowValues[amountIdx] = '=IF(' + actionLetter + newRowIdx + '="Buy",(' + qtyLetter + newRowIdx + '*' + priceLetter + newRowIdx + ')+' + feeLetter + newRowIdx + ',(' + qtyLetter + newRowIdx + '*' + priceLetter + newRowIdx + ')-' + feeLetter + newRowIdx + ')';
     } else {
       rowValues[amountIdx] = "=" + qtyLetter + newRowIdx + "*" + priceLetter + newRowIdx;
     }
@@ -631,8 +635,8 @@ function addTrade(trade) {
     rowValues[curValueIdx] = "=" + qtyLetter + newRowIdx + "*" + curPriceLetter + newRowIdx;
   }
   
-  if (pnlIdx !== -1 && actionLetter && curPriceLetter && priceLetter && qtyLetter) {
-    rowValues[pnlIdx] = '=IF(' + actionLetter + newRowIdx + '="Buy",(' + curPriceLetter + newRowIdx + '-' + priceLetter + newRowIdx + ')*' + qtyLetter + newRowIdx + ',(' + priceLetter + newRowIdx + '-' + curPriceLetter + newRowIdx + ')*' + qtyLetter + newRowIdx + ')';
+  if (pnlIdx !== -1 && actionLetter && curValueLetter && amountLetter) {
+    rowValues[pnlIdx] = '=IF(' + actionLetter + newRowIdx + '="Buy",' + curValueLetter + newRowIdx + '-' + amountLetter + newRowIdx + ',' + amountLetter + newRowIdx + '-' + curValueLetter + newRowIdx + ')';
   }
   
   if (pnlPctIdx !== -1 && pnlLetter && amountLetter) {
@@ -971,6 +975,52 @@ function updateTradeStrategy(tradeId, why, remark) {
     
     if (whyIdx !== -1) {
       sheet.getRange(rowIdx, whyIdx + 1).setValue(why);
+    }
+    if (remarkIdx !== -1) {
+      sheet.getRange(rowIdx, remarkIdx + 1).setValue(remark || "");
+    }
+    return { success: true };
+  }
+  return { success: false, error: "Row index out of bounds." };
+}
+
+function editTrade(tradeId, quantity, priceUnit, feeAmount, why, remark) {
+  ensureTableStructure();
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Journal");
+  var rowIdx = parseInt(tradeId);
+  var lastRow = sheet.getLastRow();
+  
+  if (rowIdx > 1 && rowIdx <= lastRow) {
+    var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+    var headersLower = headers.map(function(h) { return h.toString().toLowerCase().trim(); });
+    
+    var qtyIdx = headersLower.indexOf("quantity");
+    if (qtyIdx === -1) qtyIdx = headersLower.indexOf("qty");
+    
+    var priceIdx = headersLower.indexOf("price/unit");
+    if (priceIdx === -1) priceIdx = headersLower.indexOf("price_unit");
+    if (priceIdx === -1) priceIdx = headersLower.indexOf("price");
+    
+    var feeIdx = headersLower.indexOf("fee amount");
+    if (feeIdx === -1) feeIdx = headersLower.indexOf("fee");
+    
+    var whyIdx = headersLower.indexOf("why (decision reason)");
+    if (whyIdx === -1) whyIdx = headersLower.indexOf("why");
+    
+    var remarkIdx = headersLower.indexOf("remark");
+    if (remarkIdx === -1) remarkIdx = headersLower.indexOf("note");
+    
+    if (qtyIdx !== -1) {
+      sheet.getRange(rowIdx, qtyIdx + 1).setValue(parseFloat(quantity) || 0.0);
+    }
+    if (priceIdx !== -1) {
+      sheet.getRange(rowIdx, priceIdx + 1).setValue(parseFloat(priceUnit) || 0.0);
+    }
+    if (feeIdx !== -1) {
+      sheet.getRange(rowIdx, feeIdx + 1).setValue(parseFloat(feeAmount) || 0.0);
+    }
+    if (whyIdx !== -1) {
+      sheet.getRange(rowIdx, whyIdx + 1).setValue(why || "");
     }
     if (remarkIdx !== -1) {
       sheet.getRange(rowIdx, remarkIdx + 1).setValue(remark || "");

@@ -334,7 +334,7 @@ function App() {
     const whyIdx = findColIdx(["why", "decision", "reason"]);
     const remarkIdx = findColIdx(["remark", "note"]);
     const portfolioIdx = findColIdx(["portfolio", "port"]);
-    const feeRateIdx = findColIdx(["fee rate", "fee_rate", "fee %", "fee_pct", "fee"]);
+    const feeAmountIdx = findColIdx(["fee amount", "fee_amount", "fee"]);
     
     const loadedTrades = [];
     const loadedPortfolios = new Set();
@@ -444,9 +444,9 @@ function App() {
       const price = priceUnitIdx !== -1 ? parseFloat(row[priceUnitIdx]) : 0;
       
       let parsedFee = 0.0;
-      if (feeRateIdx !== -1 && row[feeRateIdx]) {
+      if (feeAmountIdx !== -1 && row[feeAmountIdx]) {
         try {
-          const rawFee = row[feeRateIdx].toString().replace('%', '').trim();
+          const rawFee = row[feeAmountIdx].toString().replace('%', '').trim();
           parsedFee = parseFloat(rawFee) || 0.0;
         } catch (e) {}
       }
@@ -463,7 +463,7 @@ function App() {
         priceUnit: isNaN(price) ? 0 : price,
         why: whyIdx !== -1 && row[whyIdx] ? row[whyIdx].toString().trim() : "",
         remark: remarkIdx !== -1 && row[remarkIdx] ? row[remarkIdx].toString().trim() : "",
-        feeRate: parsedFee
+        feeAmount: parsedFee
       });
       
       loadedPortfolios.add(portfolio);
@@ -617,10 +617,9 @@ function App() {
       const holding = running[name];
       const qty = Number(trade.quantity) || 0;
       const price = Number(trade.priceUnit) || 0;
-      const feeRate = trade.feeRate !== undefined ? Number(trade.feeRate) : 0.0;
       const isBuy = trade.action.toLowerCase() === 'buy';
 
-      const feeAmount = qty * price * (feeRate / 100);
+      const feeAmount = trade.feeAmount !== undefined ? Number(trade.feeAmount) : 0.0;
       const avgCostBefore = holding.qty > 0 ? (holding.totalCost / holding.qty) : 0;
 
       if (isBuy) {
@@ -788,10 +787,9 @@ function App() {
       const holding = runningHoldings[name];
       const qty = Number(trade.quantity) || 0;
       const price = Number(trade.priceUnit) || 0;
-      const feeRate = trade.feeRate !== undefined ? Number(trade.feeRate) : 0.0;
       const isBuy = trade.action.toLowerCase() === 'buy';
 
-      const feeAmount = qty * price * (feeRate / 100);
+      const feeAmount = trade.feeAmount !== undefined ? Number(trade.feeAmount) : 0.0;
 
       if (isBuy) {
         const costBasis = qty * price + feeAmount;
@@ -1242,7 +1240,7 @@ function App() {
         priceUnit: values.priceUnit,
         why: values.why || '',
         remark: values.remark || '',
-        feeRate: values.applyFee ? (parseFloat(values.feeRate) || 0.0) : 0.0
+        feeAmount: parseFloat(values.feeAmount) || 0.0
       };
 
       const payload = {
@@ -1311,6 +1309,9 @@ function App() {
       const finalWhy = values.why === 'Other' ? (values.customWhy || '') : values.why;
       
       const updatedData = {
+        quantity: Number(values.quantity),
+        priceUnit: Number(values.priceUnit),
+        feeAmount: Number(values.feeAmount),
         why: finalWhy,
         remark: values.remark || ''
       };
@@ -1319,12 +1320,15 @@ function App() {
         throw new Error('Apps Script URL is missing in Cloud Mode.');
       }
       await callGoogleAppsScript(scriptUrl, {
-        action: "updateTradeStrategy",
+        action: "editTrade",
         tradeId: editingTrade.id,
+        quantity: updatedData.quantity,
+        priceUnit: updatedData.priceUnit,
+        feeAmount: updatedData.feeAmount,
         why: updatedData.why,
         remark: updatedData.remark
       });
-      message.success(`Trade strategy updated successfully on Google Sheets.`);
+      message.success(`Trade entry updated successfully on Google Sheets.`);
       setTrades(prev => prev.map(t => t.id === editingTrade.id ? { ...t, ...updatedData } : t));
       setIsEditStrategyModalOpen(false);
       setEditingTrade(null);
@@ -1332,8 +1336,8 @@ function App() {
       editStrategyForm.resetFields();
       fetchData();
     } catch (error) {
-      console.error('Error updating trade strategy:', error);
-      message.error(error.message || 'Failed to update trade strategy.');
+      console.error('Error updating trade entry:', error);
+      message.error(error.message || 'Failed to update trade entry.');
     } finally {
       setIsSyncing(false);
     }
@@ -1714,13 +1718,14 @@ function App() {
       render: (val, record) => formatCurrency(val, record.currency)
     },
     {
-      title: 'Fee (%)',
-      key: 'feeRate',
+      title: 'Fee',
+      key: 'feeAmount',
       align: 'right',
       width: 100,
+      className: 'financial-num',
       render: (_, record) => {
-        const val = record.feeRate !== undefined ? Number(record.feeRate) : 0.0;
-        return val > 0 ? `${val.toFixed(3)}%` : <span style={{ color: 'var(--text-muted)' }}>Free</span>;
+        const val = record.feeAmount !== undefined ? Number(record.feeAmount) : 0.0;
+        return val > 0 ? formatCurrency(val, record.currency) : <span style={{ color: 'var(--text-muted)' }}>Free</span>;
       }
     },
     {
@@ -1732,9 +1737,9 @@ function App() {
       render: (_, record) => {
         const qty = record.quantity;
         const price = record.priceUnit;
-        const feeRate = record.feeRate !== undefined ? Number(record.feeRate) : 0.0;
+        const feeAmount = record.feeAmount !== undefined ? Number(record.feeAmount) : 0.0;
         const isBuy = record.action.toLowerCase() === 'buy';
-        const total = isBuy ? qty * price * (1 + feeRate / 100) : qty * price * (1 - feeRate / 100);
+        const total = isBuy ? (qty * price + feeAmount) : (qty * price - feeAmount);
         return formatCurrency(total, record.currency);
       }
     },
@@ -1806,7 +1811,7 @@ function App() {
             type="text" 
             icon={<EditOutlined style={{ color: 'var(--primary-color)' }} />} 
             size="small" 
-            title="Edit Strategy"
+            title="Edit Trade Entry"
             onClick={() => {
               const standardStrategies = [
                 "CDC Action Zone",
@@ -1820,6 +1825,9 @@ function App() {
               setEditingTrade(record);
               setIsCustomStrategy(isCustom);
               editStrategyForm.setFieldsValue({
+                quantity: record.quantity !== undefined ? Number(record.quantity) : 0,
+                priceUnit: record.priceUnit !== undefined ? Number(record.priceUnit) : 0,
+                feeAmount: record.feeAmount !== undefined ? Number(record.feeAmount) : 0,
                 why: isCustom ? 'Other' : (record.why || undefined),
                 customWhy: isCustom ? record.why : '',
                 remark: record.remark
@@ -3730,7 +3738,7 @@ function App() {
                           const isBuy = actionLower === 'buy';
                           const qty = trade.quantity;
                           const buyPrice = trade.priceUnit;
-                          const feeRate = trade.feeRate !== undefined ? Number(trade.feeRate) : 0.0;
+                          const feeAmount = trade.feeAmount !== undefined ? Number(trade.feeAmount) : 0.0;
                           
                           const stats = tradesWithRunningStats[trade.id];
                           const rateToTHB = liveRates[trade.currency] || 1.0;
@@ -3738,7 +3746,7 @@ function App() {
                           
                           const pnlLocal = stats ? (isBuy ? stats.unrealizedPnL : stats.realizedPnL) : 0.0;
                           const pnlConverted = (pnlLocal * rateToTHB) / displayRateToTHB;
-                          const totalCost = isBuy ? qty * buyPrice * (1 + feeRate / 100) : qty * buyPrice * (1 - feeRate / 100);
+                          const totalCost = isBuy ? (qty * buyPrice + feeAmount) : (qty * buyPrice - feeAmount);
                           
                           const isProfit = pnlConverted >= 0;
                           const hasDetails = trade.why || trade.remark;
@@ -3772,9 +3780,9 @@ function App() {
                                   </div>
                                 </div>
                                 <div>
-                                  <div className="mobile-feed-card-label">Fee (%)</div>
+                                  <div className="mobile-feed-card-label">Fee</div>
                                   <div className="mobile-feed-card-value financial-num">
-                                    {feeRate > 0 ? `${feeRate.toFixed(3)}%` : 'Free'}
+                                    {feeAmount > 0 ? formatCurrency(feeAmount, trade.currency) : 'Free'}
                                   </div>
                                 </div>
                                 <div>
@@ -3821,7 +3829,7 @@ function App() {
                                     type="text" 
                                     icon={<EditOutlined style={{ color: 'var(--primary-color)' }} />} 
                                     size="small" 
-                                    title="Edit Strategy"
+                                    title="Edit Trade Entry"
                                     onClick={() => {
                                       const standardStrategies = [
                                         "CDC Action Zone",
@@ -3835,6 +3843,9 @@ function App() {
                                       setEditingTrade(trade);
                                       setIsCustomStrategy(isCustom);
                                       editStrategyForm.setFieldsValue({
+                                        quantity: trade.quantity !== undefined ? Number(trade.quantity) : 0,
+                                        priceUnit: trade.priceUnit !== undefined ? Number(trade.priceUnit) : 0,
+                                        feeAmount: trade.feeAmount !== undefined ? Number(trade.feeAmount) : 0,
                                         why: isCustom ? 'Other' : (trade.why || undefined),
                                         customWhy: isCustom ? trade.why : '',
                                         remark: trade.remark
@@ -4566,9 +4577,9 @@ function App() {
           </Content>
         </Layout>
 
-        {/* MODAL: EDIT TRADE STRATEGY */}
+        {/* MODAL: EDIT TRADE ENTRY */}
         <Modal
-          title={`Edit Strategy for ${editingTrade?.action.toUpperCase()} ${editingTrade?.assetName}`}
+          title={`Edit Trade Entry for ${editingTrade?.action.toUpperCase()} ${editingTrade?.assetName}`}
           open={isEditStrategyModalOpen}
           onCancel={() => {
             setIsEditStrategyModalOpen(false);
@@ -4583,6 +4594,36 @@ function App() {
             layout="vertical"
             onFinish={handleUpdateStrategy}
           >
+            <Row gutter={16}>
+              <Col xs={24} sm={8}>
+                <Form.Item
+                  name="quantity"
+                  label="Quantity"
+                  rules={[{ required: true, message: 'Please input quantity' }]}
+                >
+                  <InputNumber min={0.000001} style={{ width: '100%' }} />
+                </Form.Item>
+              </Col>
+              <Col xs={24} sm={8}>
+                <Form.Item
+                  name="priceUnit"
+                  label="Price / Unit"
+                  rules={[{ required: true, message: 'Please input price per unit' }]}
+                >
+                  <InputNumber min={0.000001} style={{ width: '100%' }} />
+                </Form.Item>
+              </Col>
+              <Col xs={24} sm={8}>
+                <Form.Item
+                  name="feeAmount"
+                  label="Fee Amount"
+                  rules={[{ required: true, message: 'Please input fee amount' }]}
+                >
+                  <InputNumber min={0} style={{ width: '100%' }} />
+                </Form.Item>
+              </Col>
+            </Row>
+
             <Form.Item
               name="why"
               label="Strategy / Decision Reason"
@@ -4656,38 +4697,45 @@ function App() {
               currency: 'THB',
               assetType: 'Thai Stock',
               date: dayjs(),
-              applyFee: true,
-              feeRate: 0.168
+              feeAmount: 0.0
             }}
           >
+            {/* Row 1: Action, Asset Name, Asset Category */}
             <Row gutter={16}>
-              <Col xs={24} sm={12}>
+              <Col xs={24} sm={6}>
                 <Form.Item
-                  name="date"
-                  label="Transaction Date"
-                  rules={[{ required: true, message: 'Please select a date' }]}
+                  name="action"
+                  label="Action"
+                  rules={[{ required: true, message: 'Select Action' }]}
+                  style={{ marginBottom: 0 }}
                 >
-                  <DatePicker style={{ width: '100%' }} />
+                  <Input style={{ display: 'none' }} />
                 </Form.Item>
+                <div style={{ marginBottom: '24px' }}>
+                  <div className="action-segmented">
+                    <div 
+                      className={`action-segmented-btn buy ${formAction === 'Buy' ? 'active' : ''}`}
+                      onClick={() => {
+                        setFormAction('Buy');
+                        tradeForm.setFieldsValue({ action: 'Buy' });
+                      }}
+                    >
+                      BUY
+                    </div>
+                    <div 
+                      className={`action-segmented-btn sell ${formAction === 'Sell' ? 'active' : ''}`}
+                      onClick={() => {
+                        setFormAction('Sell');
+                        tradeForm.setFieldsValue({ action: 'Sell' });
+                      }}
+                    >
+                      SELL
+                    </div>
+                  </div>
+                </div>
               </Col>
               
-              <Col xs={24} sm={12}>
-                <Form.Item
-                  name="portfolio"
-                  label="Select Portfolio Target"
-                  rules={[{ required: true, message: 'Please select a portfolio' }]}
-                >
-                  <Select>
-                    {portfolios.map(p => (
-                      <Option key={p} value={p}>{p}</Option>
-                    ))}
-                  </Select>
-                </Form.Item>
-              </Col>
-            </Row>
-
-            <Row gutter={16}>
-              <Col xs={24} sm={12}>
+              <Col xs={24} sm={10}>
                 <Form.Item
                   name="assetName"
                   label="Asset Name (Ticker)"
@@ -4745,7 +4793,7 @@ function App() {
                 </Form.Item>
               </Col>
               
-              <Col xs={24} sm={12}>
+              <Col xs={24} sm={8}>
                 <Form.Item
                   name="assetType"
                   label="Asset Category"
@@ -4762,41 +4810,33 @@ function App() {
               </Col>
             </Row>
 
+            {/* Row 2: Transaction Date, Select Portfolio Target, Local Currency */}
             <Row gutter={16}>
               <Col xs={24} sm={8}>
                 <Form.Item
-                  name="action"
-                  label="Action"
-                  rules={[{ required: true, message: 'Select Action' }]}
-                  style={{ marginBottom: 0 }}
+                  name="date"
+                  label="Transaction Date"
+                  rules={[{ required: true, message: 'Please select a date' }]}
                 >
-                  <Input style={{ display: 'none' }} />
+                  <DatePicker style={{ width: '100%' }} />
                 </Form.Item>
-                <div style={{ marginBottom: '24px' }}>
-                  <div className="action-segmented">
-                    <div 
-                      className={`action-segmented-btn buy ${formAction === 'Buy' ? 'active' : ''}`}
-                      onClick={() => {
-                        setFormAction('Buy');
-                        tradeForm.setFieldsValue({ action: 'Buy' });
-                      }}
-                    >
-                      BUY
-                    </div>
-                    <div 
-                      className={`action-segmented-btn sell ${formAction === 'Sell' ? 'active' : ''}`}
-                      onClick={() => {
-                        setFormAction('Sell');
-                        tradeForm.setFieldsValue({ action: 'Sell' });
-                      }}
-                    >
-                      SELL
-                    </div>
-                  </div>
-                </div>
               </Col>
-
-              <Col xs={24} sm={8}>
+              
+              <Col xs={24} sm={10}>
+                <Form.Item
+                  name="portfolio"
+                  label="Select Portfolio Target"
+                  rules={[{ required: true, message: 'Please select a portfolio' }]}
+                >
+                  <Select>
+                    {portfolios.map(p => (
+                      <Option key={p} value={p}>{p}</Option>
+                    ))}
+                  </Select>
+                </Form.Item>
+              </Col>
+              
+              <Col xs={24} sm={6}>
                 <Form.Item
                   name="currency"
                   label="Local Currency"
@@ -4809,7 +4849,10 @@ function App() {
                   </Select>
                 </Form.Item>
               </Col>
+            </Row>
 
+            {/* Row 3: Quantity, Price/Unit, Trading Fee Amount */}
+            <Row gutter={16}>
               <Col xs={24} sm={8}>
                 <Form.Item
                   name="quantity"
@@ -4819,10 +4862,8 @@ function App() {
                   <InputNumber min={0.000001} style={{ width: '100%' }} />
                 </Form.Item>
               </Col>
-            </Row>
-
-            <Row gutter={16}>
-              <Col xs={24} sm={12}>
+              
+              <Col xs={24} sm={8}>
                 <Form.Item
                   name="priceUnit"
                   label="Price / Unit (Local)"
@@ -4832,60 +4873,30 @@ function App() {
                 </Form.Item>
               </Col>
               
-              <Col xs={24} sm={12}>
+              <Col xs={24} sm={8}>
                 <Form.Item
-                  name="why"
-                  label="Strategy / Decision Reason"
+                  name="feeAmount"
+                  label="Trading Fee Amount"
+                  rules={[{ required: true, message: 'Input fee amount' }]}
                 >
-                  <Input placeholder="e.g. CDC Action Zone, RSI > 70, Breakthrough" />
+                  <InputNumber
+                    min={0}
+                    style={{ width: '100%' }}
+                    placeholder="e.g. 0.00"
+                  />
                 </Form.Item>
               </Col>
             </Row>
 
-            <Row gutter={16}>
-              <Col xs={24} sm={12}>
-                <Form.Item
-                  name="applyFee"
-                  valuePropName="checked"
-                  label="Apply Trading Fee"
-                >
-                  <Checkbox onChange={(e) => {
-                    if (!e.target.checked) {
-                      tradeForm.setFieldsValue({ feeRate: 0.0 });
-                    } else {
-                      tradeForm.setFieldsValue({ feeRate: 0.168 });
-                    }
-                  }}>Include transaction fee</Checkbox>
-                </Form.Item>
-              </Col>
-              
-              <Col xs={24} sm={12}>
-                <Form.Item
-                  noStyle
-                  shouldUpdate={(prevValues, currentValues) => prevValues.applyFee !== currentValues.applyFee}
-                >
-                  {({ getFieldValue }) => {
-                    const applyFee = getFieldValue('applyFee');
-                    return (
-                      <Form.Item
-                        name="feeRate"
-                        label="Trading Fee Rate (%)"
-                        rules={[{ required: applyFee, message: 'Input fee rate' }]}
-                      >
-                        <InputNumber
-                          min={0}
-                          max={100}
-                          step={0.001}
-                          disabled={!applyFee}
-                          style={{ width: '100%' }}
-                        />
-                      </Form.Item>
-                    );
-                  }}
-                </Form.Item>
-              </Col>
-            </Row>
+            {/* Row 4: Strategy */}
+            <Form.Item
+              name="why"
+              label="Strategy / Decision Reason"
+            >
+              <Input placeholder="e.g. CDC Action Zone, RSI > 70, Breakthrough" />
+            </Form.Item>
 
+            {/* Row 5: Remarks */}
             <Form.Item
               name="remark"
               label="Remarks (Notes)"
