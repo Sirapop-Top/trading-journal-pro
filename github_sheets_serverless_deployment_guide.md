@@ -76,6 +76,7 @@ Once the code is pushed, GitHub will automatically build your frontend using Git
 ## 📜 Apps Script API Code
 Paste this complete script inside your Google Apps Script editor (Step 1.6):
 
+```javascript
 function doGet(e) {
   var action = e.parameter.action;
   
@@ -1054,3 +1055,5 @@ function updateTradePortfolio(tradeId, targetPortfolio) {
   }
   return { success: false, error: "Row index out of bounds." };
 }
+```
+
