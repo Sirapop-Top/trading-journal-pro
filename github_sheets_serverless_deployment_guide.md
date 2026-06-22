@@ -261,6 +261,96 @@ function ensureTableStructure() {
           journalSheet.deleteColumns(18, colsToDelete);
         }
       }
+      
+      // Batch formula update logic to rewrite/repair all existing rows' formulas
+      var lastRow = journalSheet.getLastRow();
+      if (lastRow >= 2) {
+        var finalHeaders = journalSheet.getRange(1, 1, 1, journalSheet.getLastColumn()).getValues()[0];
+        var finalHeadersLower = finalHeaders.map(function(h) { return h.toString().toLowerCase().trim(); });
+        
+        function getColLetter(colIdx) {
+          if (colIdx === -1) return "";
+          var temp = colIdx + 1;
+          var letter = "";
+          while (temp > 0) {
+            var mod = (temp - 1) % 26;
+            letter = String.fromCharCode(65 + mod) + letter;
+            temp = Math.floor((temp - mod - 1) / 26);
+          }
+          return letter;
+        }
+        
+        var qtyIdx = finalHeadersLower.indexOf("quantity");
+        if (qtyIdx === -1) qtyIdx = finalHeadersLower.indexOf("qty");
+        var priceIdx = finalHeadersLower.indexOf("price/unit");
+        if (priceIdx === -1) priceIdx = finalHeadersLower.indexOf("price_unit");
+        if (priceIdx === -1) priceIdx = finalHeadersLower.indexOf("price");
+        var actIdx = finalHeadersLower.indexOf("action");
+        var cPriceIdx = finalHeadersLower.indexOf("current price");
+        var cValIdx = finalHeadersLower.indexOf("current value");
+        var amtIdx = finalHeadersLower.indexOf("amount");
+        var plIdx = finalHeadersLower.indexOf("p&l");
+        var plPctIdx = finalHeadersLower.indexOf("p&l %");
+        var fAmtIdx = finalHeadersLower.indexOf("fee amount");
+        if (fAmtIdx === -1) fAmtIdx = finalHeadersLower.indexOf("fee");
+        
+        var qtyL = getColLetter(qtyIdx);
+        var priceL = getColLetter(priceIdx);
+        var actL = getColLetter(actIdx);
+        var cPriceL = getColLetter(cPriceIdx);
+        var cValL = getColLetter(cValIdx);
+        var amtL = getColLetter(amtIdx);
+        var plL = getColLetter(plIdx);
+        var fAmtL = getColLetter(fAmtIdx);
+        
+        var amtFormulas = [];
+        var valFormulas = [];
+        var plFormulas = [];
+        var plPctFormulas = [];
+        
+        for (var r = 2; r <= lastRow; r++) {
+          var amtF = "";
+          if (qtyL && priceL) {
+            if (fAmtL) {
+              amtF = '=IF(' + actL + r + '="Buy",(' + qtyL + r + '*' + priceL + r + ')+' + fAmtL + r + ',(' + qtyL + r + '*' + priceL + r + ')-' + fAmtL + r + ')';
+            } else {
+              amtF = "=" + qtyL + r + "*" + priceL + r;
+            }
+          }
+          amtFormulas.push([amtF]);
+          
+          var valF = "";
+          if (qtyL && cPriceL) {
+            valF = "=" + qtyL + r + "*" + cPriceL + r;
+          }
+          valFormulas.push([valF]);
+          
+          var plF = "";
+          if (actL && cValL && amtL) {
+            plF = '=IF(' + actL + r + '="Buy",' + cValL + r + '-' + amtL + r + ',' + amtL + r + '-' + cValL + r + ')';
+          }
+          plFormulas.push([plF]);
+          
+          var plPctF = "";
+          if (plL && amtL) {
+            plPctF = "=IF(" + amtL + r + "=0,0," + plL + r + "/" + amtL + r + ")";
+          }
+          plPctFormulas.push([plPctF]);
+        }
+        
+        if (amtIdx !== -1 && amtFormulas.length > 0) {
+          journalSheet.getRange(2, amtIdx + 1, amtFormulas.length, 1).setFormulas(amtFormulas);
+        }
+        if (cValIdx !== -1 && valFormulas.length > 0) {
+          journalSheet.getRange(2, cValIdx + 1, valFormulas.length, 1).setFormulas(valFormulas);
+        }
+        if (plIdx !== -1 && plFormulas.length > 0) {
+          journalSheet.getRange(2, plIdx + 1, plFormulas.length, 1).setFormulas(plFormulas);
+        }
+        if (plPctIdx !== -1 && plPctFormulas.length > 0) {
+          journalSheet.getRange(2, plPctIdx + 1, plPctFormulas.length, 1).setFormulas(plPctFormulas);
+        }
+      }
     }
   }
   
