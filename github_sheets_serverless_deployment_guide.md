@@ -196,6 +196,8 @@ function ensureTableStructure() {
           cleanH = "Price/Unit";
         } else if (hLower.indexOf("portfolio") !== -1 || hLower.indexOf("port") !== -1) {
           cleanH = "Portfolio";
+        } else if (hLower.indexOf("fee") !== -1) {
+          cleanH = "Fee Amount";
         } else if (hLower.indexOf("amount") !== -1) {
           cleanH = "Amount";
         } else if (hLower.indexOf("current price") !== -1) {
@@ -206,8 +208,6 @@ function ensureTableStructure() {
           cleanH = "P&L %";
         } else if (hLower.indexOf("p&l") !== -1) {
           cleanH = "P&L";
-        } else if (hLower.indexOf("fee") !== -1) {
-          cleanH = "Fee Amount";
         } else if (hLower.indexOf("why") !== -1 || hLower.indexOf("decision") !== -1 || hLower.indexOf("reason") !== -1) {
           cleanH = "Why (Decision Reason)";
         } else if (hLower.indexOf("remark") !== -1 || hLower.indexOf("note") !== -1) {
@@ -235,6 +235,31 @@ function ensureTableStructure() {
       if (missingHeaders.length > 0) {
         journalSheet.getRange(1, lastCol + 1, 1, missingHeaders.length).setValues([missingHeaders]);
         journalSheet.getRange(1, lastCol + 1, 1, missingHeaders.length).setFontWeight("bold");
+      }
+      
+      // Self-heal: Clean up duplicate "Amount" columns from Q to AG, and restore "Fee Amount" back to column Q (index 17)
+      var maxCol = journalSheet.getLastColumn();
+      if (maxCol > 17) {
+        var rawHeaders = journalSheet.getRange(1, 1, 1, maxCol).getValues()[0];
+        var feeColIdx = -1;
+        for (var i = 17; i < rawHeaders.length; i++) {
+          if (rawHeaders[i].toString().toLowerCase().trim().indexOf("fee") !== -1) {
+            feeColIdx = i;
+            break;
+          }
+        }
+        if (feeColIdx !== -1) {
+          var lastRow = journalSheet.getLastRow();
+          if (lastRow >= 1) {
+            var feeValues = journalSheet.getRange(1, feeColIdx + 1, lastRow, 1).getValues();
+            journalSheet.getRange(1, 17, lastRow, 1).setValues(feeValues);
+          }
+        }
+        journalSheet.getRange(1, 17).setValue("Fee Amount");
+        var colsToDelete = maxCol - 17;
+        if (colsToDelete > 0) {
+          journalSheet.deleteColumns(18, colsToDelete);
+        }
       }
     }
   }
