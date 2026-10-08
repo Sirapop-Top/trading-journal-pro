@@ -219,6 +219,7 @@ export const computePositions = (trades = [], livePrices = {}, liveRates = {}, d
     const totalPnLConverted = unrealizedPnLConverted + realizedPnLConverted;
     const wacConverted = (wac * rateToTHB) / displayRateToTHB;
     const livePriceConverted = (livePrice * rateToTHB) / displayRateToTHB;
+    const totalBuyCostConverted = (holding.totalBuyCost * rateToTHB) / displayRateToTHB;
 
     return {
       ...holding,
@@ -236,6 +237,7 @@ export const computePositions = (trades = [], livePrices = {}, liveRates = {}, d
       unrealizedPnLConverted,
       realizedPnLConverted,
       totalPnLConverted,
+      totalBuyCostConverted,
       unrealizedPnLPct: totalCost > 0 ? (unrealizedPnL / totalCost) * 100 : 0
     };
   });
@@ -249,6 +251,7 @@ export const computeKpis = (positions = []) => {
   let currentMarketValueConverted = 0;
   let totalUnrealizedPnLConverted = 0;
   let totalRealizedPnLConverted = 0;
+  let totalBuyCostEverConverted = 0;
 
   positions.forEach(pos => {
     if (pos.qtyHeld > 0) {
@@ -257,16 +260,19 @@ export const computeKpis = (positions = []) => {
       totalUnrealizedPnLConverted += pos.unrealizedPnLConverted;
     }
     totalRealizedPnLConverted += pos.realizedPnLConverted;
+    totalBuyCostEverConverted += pos.totalBuyCostConverted || 0;
   });
 
   const totalPnLConverted = totalUnrealizedPnLConverted + totalRealizedPnLConverted;
-  const totalPnLPct = totalInvestedConverted > 0 ? (totalPnLConverted / totalInvestedConverted) * 100 : 0;
+  const denominator = totalBuyCostEverConverted > 0 ? totalBuyCostEverConverted : totalInvestedConverted;
+  const totalPnLPct = denominator > 0 ? (totalPnLConverted / denominator) * 100 : 0;
 
   return {
     totalInvestedConverted,
     currentMarketValueConverted,
     totalUnrealizedPnLConverted,
     totalRealizedPnLConverted,
+    totalBuyCostEverConverted,
     totalPnLConverted,
     totalPnLPct
   };
@@ -274,6 +280,7 @@ export const computeKpis = (positions = []) => {
 
 /**
  * Portfolio sizing and cash balance calculations.
+ * Bug fix 2.1: positionSizeCash uses cashOnHand directly without double-counting realizedPnL.
  */
 export const computePortfolioSizing = ({
   portfolios = [],
@@ -306,7 +313,7 @@ export const computePortfolioSizing = ({
 
   const cashOnHand = initialCapital - totalInvested + totalRealizedPnL;
   const positionSizeBalance = targetStocks > 0 ? (initialCapital + totalRealizedPnL) / targetStocks : 0;
-  const positionSizeCash = targetStocks > 0 ? (cashOnHand + totalRealizedPnL) / targetStocks : 0;
+  const positionSizeCash = targetStocks > 0 ? cashOnHand / targetStocks : 0;
   const activeHoldingsCount = positions.filter(pos => pos.qtyHeld > 0).length;
 
   return {
@@ -321,42 +328,32 @@ export const computePortfolioSizing = ({
 
 /**
  * Cumulative Realized P&L over time.
+ * Bug fix 2.2: Uses computeTradeStats realizedPnL (including buy & sell fees).
+ * The final data point matches kpis.totalRealizedPnLConverted.
  */
 export const computeCumulativeRealized = (trades = [], liveRates = {}, displayCurrency = 'THB') => {
   const sortedTrades = sortChronologically(trades);
-  const assetState = {};
+  const statsMap = computeTradeStats(sortedTrades);
   let runningRealizedPnL = 0;
   const datePnLMap = {};
 
   sortedTrades.forEach(trade => {
-    const name = trade.assetName;
-    const qty = Number(trade.quantity) || 0;
-    const price = Number(trade.priceUnit) || 0;
-    const action = (trade.action || '').toLowerCase();
+    const isSell = (trade.action || '').toLowerCase() === 'sell';
     const date = trade.date;
 
-    if (!assetState[name]) {
-      assetState[name] = { qty: 0, totalCost: 0 };
-    }
-    const state = assetState[name];
-
-    const rateToTHB = liveRates[trade.currency] || 1.0;
-    const displayRateToTHB = liveRates[displayCurrency] || 1.0;
-
-    if (action === 'buy') {
-      state.qty += qty;
-      state.totalCost += qty * price;
-    } else if (action === 'sell') {
-      const wac = state.qty > 0 ? (state.totalCost / state.qty) : 0;
-      const realized = (price - wac) * qty;
-      const realizedConverted = (realized * rateToTHB) / displayRateToTHB;
-      runningRealizedPnL += realizedConverted;
-
-      state.qty = Math.max(0, state.qty - qty);
-      state.totalCost = Math.max(0, state.totalCost - (qty * wac));
+    if (isSell) {
+      const stats = statsMap[trade.id];
+      if (stats) {
+        const rateToTHB = liveRates[trade.currency] || 1.0;
+        const displayRateToTHB = liveRates[displayCurrency] || 1.0;
+        const realizedConverted = (stats.realizedPnL * rateToTHB) / displayRateToTHB;
+        runningRealizedPnL += realizedConverted;
+      }
     }
 
-    datePnLMap[date] = Number(runningRealizedPnL.toFixed(2));
+    if (date) {
+      datePnLMap[date] = Number(runningRealizedPnL.toFixed(2));
+    }
   });
 
   const sortedDates = Object.keys(datePnLMap).sort((a, b) => dayjs(a).unix() - dayjs(b).unix());
@@ -369,49 +366,74 @@ export const computeCumulativeRealized = (trades = [], liveRates = {}, displayCu
 
 /**
  * P&L by Dimension (Strategy, Category, or Asset Name).
+ * Bug fix 2.3: Supports realized and unrealized modes.
+ * In realized mode, sums realized P&L per sell trade; in unrealized mode, sums open positions.
  */
 export const computePnlByDimension = (
   trades = [],
   livePrices = {},
   liveRates = {},
   displayCurrency = 'THB',
-  pnlDimension = 'strategy'
+  pnlDimension = 'strategy',
+  pnlMode = 'realized',
+  positions = []
 ) => {
   const groupings = {};
 
-  trades.forEach(trade => {
-    let key = 'Unspecified';
-    if (pnlDimension === 'strategy') {
-      key = trade.why || 'Unspecified';
-    } else if (pnlDimension === 'type') {
-      key = trade.assetType || 'Thai Stock';
-    } else if (pnlDimension === 'name') {
-      key = trade.assetName;
-    }
+  if (pnlMode === 'realized') {
+    const sortedTrades = sortChronologically(trades);
+    const statsMap = computeTradeStats(sortedTrades, livePrices);
+    const lastBuyStrategy = {};
 
-    const qty = Number(trade.quantity) || 0;
-    const buyPrice = Number(trade.priceUnit) || 0;
-    const asset = trade.assetName;
+    sortedTrades.forEach(trade => {
+      const action = (trade.action || '').toLowerCase();
+      const asset = trade.assetName;
 
-    const livePrice = livePrices[asset] !== undefined && livePrices[asset] !== null
-      ? livePrices[asset]
-      : buyPrice;
+      if (action === 'buy') {
+        if (trade.why && trade.why.trim()) {
+          lastBuyStrategy[asset] = trade.why.trim();
+        }
+      } else if (action === 'sell') {
+        let key = 'Unspecified';
+        if (pnlDimension === 'strategy') {
+          key = (trade.why && trade.why.trim()) || lastBuyStrategy[asset] || 'Unspecified';
+        } else if (pnlDimension === 'type') {
+          key = trade.assetType || 'Thai Stock';
+        } else if (pnlDimension === 'name') {
+          key = trade.assetName || 'Unknown';
+        }
 
-    const rateToTHB = liveRates[trade.currency] || 1.0;
-    const displayRateToTHB = liveRates[displayCurrency] || 1.0;
+        const stats = statsMap[trade.id];
+        const realized = stats ? stats.realizedPnL : 0;
+        const rateToTHB = liveRates[trade.currency] || 1.0;
+        const displayRateToTHB = liveRates[displayCurrency] || 1.0;
+        const realizedConverted = (realized * rateToTHB) / displayRateToTHB;
 
-    let pnlConverted = 0;
-    if ((trade.action || '').toLowerCase() === 'buy') {
-      pnlConverted = ((livePrice - buyPrice) * qty * rateToTHB) / displayRateToTHB;
-    } else if ((trade.action || '').toLowerCase() === 'sell') {
-      pnlConverted = ((buyPrice - livePrice) * qty * rateToTHB) / displayRateToTHB;
-    }
+        groupings[key] = (groupings[key] || 0) + realizedConverted;
+      }
+    });
+  } else {
+    // Unrealized mode (from active positions)
+    positions.forEach(pos => {
+      if (pos.qtyHeld <= 0) return;
+      let key = 'Unspecified';
+      if (pnlDimension === 'type') {
+        key = pos.assetType || 'Thai Stock';
+      } else if (pnlDimension === 'name') {
+        key = pos.assetName;
+      } else if (pnlDimension === 'strategy') {
+        key = pos.why || 'Unspecified';
+      }
 
-    groupings[key] = (groupings[key] || 0) + pnlConverted;
-  });
+      groupings[key] = (groupings[key] || 0) + (pos.unrealizedPnLConverted || 0);
+    });
+  }
 
-  return Object.keys(groupings).map(key => ({
-    name: key,
-    PnL: Number(groupings[key].toFixed(2))
-  }));
+  return Object.keys(groupings)
+    .map(key => ({
+      name: key,
+      PnL: Number(groupings[key].toFixed(2))
+    }))
+    .sort((a, b) => b.PnL - a.PnL);
 };
+

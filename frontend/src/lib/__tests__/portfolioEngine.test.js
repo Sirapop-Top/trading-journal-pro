@@ -5,7 +5,9 @@ import {
   computePositions,
   computeKpis,
   computeTradingAnalytics,
-  computePortfolioSizing
+  computePortfolioSizing,
+  computeCumulativeRealized,
+  computePnlByDimension
 } from '../portfolioEngine.js';
 
 describe('portfolioEngine core WAC calculations', () => {
@@ -82,14 +84,15 @@ describe('portfolioEngine core WAC calculations', () => {
     expect(aapl.unrealizedPnLConverted).toBe(3500);
   });
 
-  it('computes KPIs and portfolio sizing', () => {
+  it('computes KPIs and portfolio sizing without double-counting realized PnL in positionSizeCash', () => {
     const positions = [
       {
         qtyHeld: 10,
         totalCostConverted: 50000,
         liveValueConverted: 60000,
         unrealizedPnLConverted: 10000,
-        realizedPnLConverted: 5000
+        realizedPnLConverted: 5000,
+        totalBuyCostConverted: 50000
       }
     ];
 
@@ -110,7 +113,63 @@ describe('portfolioEngine core WAC calculations', () => {
     });
     // cashOnHand = initialCapital (100000) - totalInvested (50000) + totalRealized (5000) = 55000
     expect(sizing.cashOnHand).toBe(55000);
+    // positionSizeCash = cashOnHand / targetStocks = 55000 / 10 = 5500 (NOT (55000 + 5000)/10 = 6000)
+    expect(sizing.positionSizeCash).toBe(5500);
     expect(sizing.activeHoldingsCount).toBe(1);
+  });
+
+  it('computes totalPnLPct correctly even when portfolio is 100% sold out', () => {
+    const trades = [
+      { id: '1', date: '2026-06-01', assetName: 'BTC', action: 'Buy', quantity: 1, priceUnit: 100000, feeAmount: 0, currency: 'THB' },
+      { id: '2', date: '2026-06-02', assetName: 'BTC', action: 'Sell', quantity: 1, priceUnit: 120000, feeAmount: 0, currency: 'THB' }
+    ];
+
+    const positions = computePositions(trades, { BTC: 120000 }, { THB: 1 }, 'THB');
+    expect(positions[0].qtyHeld).toBe(0);
+
+    const kpis = computeKpis(positions);
+    expect(kpis.totalInvestedConverted).toBe(0);
+    expect(kpis.totalRealizedPnLConverted).toBe(20000);
+    // Denominator should be totalBuyCostEver = 100000, so return is +20%
+    expect(kpis.totalPnLPct).toBe(20);
+  });
+
+  it('matches cumulative realized P&L final point with kpis.totalRealizedPnLConverted', () => {
+    const trades = [
+      { id: '1', date: '2026-06-01', assetName: 'MSTR', action: 'Buy', quantity: 10, priceUnit: 1000, feeAmount: 10, currency: 'USD' },
+      { id: '2', date: '2026-06-02', assetName: 'MSTR', action: 'Sell', quantity: 5, priceUnit: 1200, feeAmount: 15, currency: 'USD' },
+      { id: '3', date: '2026-06-03', assetName: 'MSTR', action: 'Sell', quantity: 5, priceUnit: 1100, feeAmount: 10, currency: 'USD' }
+    ];
+    const liveRates = { USD: 35.0, THB: 1.0 };
+    const positions = computePositions(trades, { MSTR: 1100 }, liveRates, 'THB');
+    const kpis = computeKpis(positions);
+
+    const cumulative = computeCumulativeRealized(trades, liveRates, 'THB');
+    expect(cumulative).toHaveLength(3); // 1 buy date (0) + 2 sell dates
+    const lastPoint = cumulative[cumulative.length - 1];
+    expect(lastPoint.PnL).toBe(Number(kpis.totalRealizedPnLConverted.toFixed(2)));
+  });
+
+  it('computes P&L by Dimension matching total realized P&L and attributes strategy correctly', () => {
+    const trades = [
+      { id: '1', date: '2026-06-01', assetName: 'BTC', action: 'Buy', quantity: 1, priceUnit: 50000, feeAmount: 0, why: 'Breakout', currency: 'USD' },
+      { id: '2', date: '2026-06-02', assetName: 'ETH', action: 'Buy', quantity: 10, priceUnit: 3000, feeAmount: 0, why: 'Dip Buy', currency: 'USD' },
+      { id: '3', date: '2026-06-03', assetName: 'BTC', action: 'Sell', quantity: 1, priceUnit: 60000, feeAmount: 0, why: '', currency: 'USD' }, // empty why -> inherits 'Breakout'
+      { id: '4', date: '2026-06-04', assetName: 'ETH', action: 'Sell', quantity: 10, priceUnit: 2800, feeAmount: 0, why: 'Stop Loss', currency: 'USD' }
+    ];
+    const liveRates = { USD: 1.0 };
+    const positions = computePositions(trades, {}, liveRates, 'USD');
+    const kpis = computeKpis(positions);
+
+    const pnlByStrategy = computePnlByDimension(trades, {}, liveRates, 'USD', 'strategy', 'realized', positions);
+    // BTC: +10000 to 'Breakout', ETH: -2000 to 'Stop Loss'
+    const breakout = pnlByStrategy.find(s => s.name === 'Breakout');
+    const stopLoss = pnlByStrategy.find(s => s.name === 'Stop Loss');
+    expect(breakout.PnL).toBe(10000);
+    expect(stopLoss.PnL).toBe(-2000);
+
+    const totalFromGroups = pnlByStrategy.reduce((sum, item) => sum + item.PnL, 0);
+    expect(totalFromGroups).toBe(kpis.totalRealizedPnLConverted);
   });
 
   it('computes trading analytics win rate and profit factor', () => {

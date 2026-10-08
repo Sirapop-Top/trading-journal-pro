@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { 
   Layout, Menu, Button, Card, Table, Modal, 
   Form, Input, InputNumber, Select, DatePicker, Row, Col, Space, 
-  Spin, Tag, Typography, Popconfirm, message, Alert, Switch, ConfigProvider, theme, Progress
+  Spin, Tag, Typography, Popconfirm, message, Alert, Switch, ConfigProvider, theme, Progress, Radio
 } from 'antd';
 import { 
   DashboardOutlined, 
@@ -47,6 +47,12 @@ import {
   computeCumulativeRealized,
   computePnlByDimension
 } from './lib/portfolioEngine.js';
+import {
+  generateSalt,
+  hashPasscode,
+  verifyPasscode,
+  migrateLegacyPasscode
+} from './lib/security.js';
 
 const { Header, Content, Sider } = Layout;
 const { Title, Text } = Typography;
@@ -111,6 +117,7 @@ function App() {
   };
   const [allocationDimension, setAllocationDimension] = useState('type'); // 'type' | 'name'
   const [pnlDimension, setPnlDimension] = useState('strategy'); // 'strategy' | 'type' | 'name'
+  const [pnlMode, setPnlMode] = useState('realized'); // 'realized' | 'unrealized'
   const [siderCollapsed, setSiderCollapsed] = useState(false);
   const [windowWidth, setWindowWidth] = useState(window.innerWidth);
   const [mobileChartTab, setMobileChartTab] = useState('performance'); // 'performance' | 'allocation' | 'pnl' | 'breakdown'
@@ -173,12 +180,64 @@ function App() {
   });
 
   // Passcode Security States
-  const [appPasscode, setAppPasscode] = useState(() => localStorage.getItem('alphatrader_passcode') || '');
-  const [isLocked, setIsLocked] = useState(() => !!localStorage.getItem('alphatrader_passcode'));
+  const [appPasscode, setAppPasscode] = useState('');
+  const [hasPasscode, setHasPasscode] = useState(() => {
+    return !!(localStorage.getItem('alphatrader_passcode_hash') || localStorage.getItem('alphatrader_passcode'));
+  });
+  const [isLocked, setIsLocked] = useState(() => {
+    return !!(localStorage.getItem('alphatrader_passcode_hash') || localStorage.getItem('alphatrader_passcode'));
+  });
   const [failedAttempts, setFailedAttempts] = useState(0);
   const [lockoutTimeRemaining, setLockoutTimeRemaining] = useState(0);
   const [enteredPasscode, setEnteredPasscode] = useState('');
   const [autoLockMinutes, setAutoLockMinutes] = useState(() => Number(localStorage.getItem('alphatrader_autolock') || '0')); // 0 = disabled
+
+  // Migrate legacy plaintext passcode on initial startup
+  useEffect(() => {
+    migrateLegacyPasscode().then(migrated => {
+      if (migrated) {
+        setHasPasscode(true);
+      }
+    });
+  }, []);
+
+  const handleUnlock = async () => {
+    if (lockoutTimeRemaining > 0) return;
+    const storedHash = localStorage.getItem('alphatrader_passcode_hash');
+    const storedSalt = localStorage.getItem('alphatrader_passcode_salt');
+    const legacyPass = localStorage.getItem('alphatrader_passcode');
+
+    let isValid = false;
+    if (storedHash && storedSalt) {
+      isValid = await verifyPasscode(enteredPasscode, storedHash, storedSalt);
+    } else if (legacyPass) {
+      isValid = (enteredPasscode === legacyPass);
+      if (isValid) {
+        const salt = generateSalt();
+        const hash = await hashPasscode(legacyPass, salt);
+        localStorage.setItem('alphatrader_passcode_hash', hash);
+        localStorage.setItem('alphatrader_passcode_salt', salt);
+        localStorage.removeItem('alphatrader_passcode');
+      }
+    }
+
+    if (isValid) {
+      setIsLocked(false);
+      setFailedAttempts(0);
+      setEnteredPasscode('');
+      message.success('Welcome back!');
+    } else {
+      const attempts = failedAttempts + 1;
+      setFailedAttempts(attempts);
+      setEnteredPasscode('');
+      if (attempts >= 5) {
+        setLockoutTimeRemaining(60);
+        message.error('Too many failed attempts. Locked out for 60 seconds.');
+      } else {
+        message.error(`Incorrect passcode. ${5 - attempts} attempts remaining.`);
+      }
+    }
+  };
 
   // Edit Strategy States
   const [isEditStrategyModalOpen, setIsEditStrategyModalOpen] = useState(false);
@@ -203,7 +262,7 @@ function App() {
 
   // Idle Timer Auto-Lock
   useEffect(() => {
-    if (!appPasscode || autoLockMinutes <= 0 || isLocked) return;
+    if (!hasPasscode || autoLockMinutes <= 0 || isLocked) return;
 
     let timeoutId;
     const resetTimer = () => {
@@ -651,8 +710,8 @@ function App() {
 
   // 3. P&L by Dimension (Strategy, Category, or Asset Name)
   const pnlDistributionData = useMemo(() => {
-    return computePnlByDimension(filteredTrades, livePrices, liveRates, displayCurrency, pnlDimension);
-  }, [filteredTrades, livePrices, liveRates, displayCurrency, pnlDimension]);
+    return computePnlByDimension(filteredTrades, livePrices, liveRates, displayCurrency, pnlDimension, pnlMode, positions);
+  }, [filteredTrades, livePrices, liveRates, displayCurrency, pnlDimension, pnlMode, positions]);
 
   // 4. Realized P&L Breakdown Data by Asset Name
   const realizedPnLBreakdownData = useMemo(() => {
@@ -1684,10 +1743,13 @@ function App() {
                   localStorage.removeItem('google_sheet_id');
                   localStorage.removeItem('google_apps_script_url');
                   localStorage.removeItem('alphatrader_passcode');
+                  localStorage.removeItem('alphatrader_passcode_hash');
+                  localStorage.removeItem('alphatrader_passcode_salt');
                   localStorage.removeItem('alphatrader_autolock');
                   setGoogleSheetId('');
                   setGoogleAppsScriptUrl('');
                   setAppPasscode('');
+                  setHasPasscode(false);
                   setIsConnected(false);
                   message.success('Cleared all connection settings and logged out.');
                 }}
@@ -1804,25 +1866,7 @@ function App() {
                 size="large"
                 value={enteredPasscode}
                 onChange={(e) => setEnteredPasscode(e.target.value)}
-                onPressEnter={() => {
-                  if (lockoutTimeRemaining > 0) return;
-                  if (enteredPasscode === appPasscode) {
-                    setIsLocked(false);
-                    setFailedAttempts(0);
-                    setEnteredPasscode('');
-                    message.success('Welcome back!');
-                  } else {
-                    const attempts = failedAttempts + 1;
-                    setFailedAttempts(attempts);
-                    setEnteredPasscode('');
-                    if (attempts >= 5) {
-                      setLockoutTimeRemaining(60);
-                      message.error('Too many failed attempts. Locked out for 60 seconds.');
-                    } else {
-                      message.error(`Incorrect passcode. ${5 - attempts} attempts remaining.`);
-                    }
-                  }
-                }}
+                onPressEnter={handleUnlock}
                 disabled={lockoutTimeRemaining > 0}
                 style={{
                   textAlign: 'center',
@@ -1839,24 +1883,7 @@ function App() {
                 type="primary"
                 size="large"
                 disabled={lockoutTimeRemaining > 0}
-                onClick={() => {
-                  if (enteredPasscode === appPasscode) {
-                    setIsLocked(false);
-                    setFailedAttempts(0);
-                    setEnteredPasscode('');
-                    message.success('Welcome back!');
-                  } else {
-                    const attempts = failedAttempts + 1;
-                    setFailedAttempts(attempts);
-                    setEnteredPasscode('');
-                    if (attempts >= 5) {
-                      setLockoutTimeRemaining(60);
-                      message.error('Too many failed attempts. Locked out for 60 seconds.');
-                    } else {
-                      message.error(`Incorrect passcode. ${5 - attempts} attempts remaining.`);
-                    }
-                  }
-                }}
+                onClick={handleUnlock}
                 style={{
                   background: 'var(--accent-gradient)',
                   border: 'none',
@@ -2124,7 +2151,7 @@ function App() {
                 >
                   {isCensored ? "Show Balances" : "Censor Balances"}
                 </Button>
-                {appPasscode && (
+                {hasPasscode && (
                   <Button 
                     icon={<LockOutlined />} 
                     onClick={() => setIsLocked(true)}
@@ -2547,17 +2574,38 @@ function App() {
                     <Card 
                       title={`Portfolio P&L (${displayCurrency})`}
                       extra={
-                        <Select
-                          size="small"
-                          value={pnlDimension}
-                          onChange={val => setPnlDimension(val)}
-                          style={{ width: 110 }}
-                          dropdownStyle={{ background: 'var(--bg-card)' }}
-                        >
-                          <Option value="strategy">By Strategy</Option>
-                          <Option value="type">By Category</Option>
-                          <Option value="name">By Asset</Option>
-                        </Select>
+                        <Space size={4} wrap>
+                          <Radio.Group
+                            size="small"
+                            value={pnlMode}
+                            onChange={e => {
+                              const mode = e.target.value;
+                              if (mode === 'unrealized' && pnlDimension === 'strategy') {
+                                setPnlDimension('name');
+                              }
+                              setPnlMode(mode);
+                            }}
+                          >
+                            <Radio.Button value="realized">Realized</Radio.Button>
+                            <Radio.Button value="unrealized">Unrealized</Radio.Button>
+                          </Radio.Group>
+                          <Select
+                            size="small"
+                            value={pnlDimension}
+                            onChange={val => {
+                              if (val === 'strategy' && pnlMode === 'unrealized') {
+                                setPnlMode('realized');
+                              }
+                              setPnlDimension(val);
+                            }}
+                            style={{ width: 110 }}
+                            dropdownStyle={{ background: 'var(--bg-card)' }}
+                          >
+                            <Option value="strategy" disabled={pnlMode === 'unrealized'}>By Strategy</Option>
+                            <Option value="type">By Category</Option>
+                            <Option value="name">By Asset</Option>
+                          </Select>
+                        </Space>
                       } 
                       bordered={false} 
                       style={{ height: '310px' }}
@@ -3122,17 +3170,38 @@ function App() {
                       <Card 
                         title={`Portfolio P&L (${displayCurrency})`}
                         extra={
-                          <Select
-                            size="small"
-                            value={pnlDimension}
-                            onChange={val => setPnlDimension(val)}
-                            style={{ width: 140 }}
-                            dropdownStyle={{ background: 'var(--bg-card)' }}
-                          >
-                            <Option value="strategy">By Strategy</Option>
-                            <Option value="type">By Category</Option>
-                            <Option value="name">By Asset Name</Option>
-                          </Select>
+                          <Space size="small">
+                            <Radio.Group
+                              size="small"
+                              value={pnlMode}
+                              onChange={e => {
+                                const mode = e.target.value;
+                                if (mode === 'unrealized' && pnlDimension === 'strategy') {
+                                  setPnlDimension('name');
+                                }
+                                setPnlMode(mode);
+                              }}
+                            >
+                              <Radio.Button value="realized">Realized</Radio.Button>
+                              <Radio.Button value="unrealized">Unrealized</Radio.Button>
+                            </Radio.Group>
+                            <Select
+                              size="small"
+                              value={pnlDimension}
+                              onChange={val => {
+                                if (val === 'strategy' && pnlMode === 'unrealized') {
+                                  setPnlMode('realized');
+                                }
+                                setPnlDimension(val);
+                              }}
+                              style={{ width: 130 }}
+                              dropdownStyle={{ background: 'var(--bg-card)' }}
+                            >
+                              <Option value="strategy" disabled={pnlMode === 'unrealized'}>By Strategy</Option>
+                              <Option value="type">By Category</Option>
+                              <Option value="name">By Asset Name</Option>
+                            </Select>
+                          </Space>
                         } 
                         bordered={false} 
                         style={{ height: '370px' }}
@@ -4006,10 +4075,13 @@ function App() {
                               localStorage.removeItem('google_sheet_id');
                               localStorage.removeItem('google_apps_script_url');
                               localStorage.removeItem('alphatrader_passcode');
+                              localStorage.removeItem('alphatrader_passcode_hash');
+                              localStorage.removeItem('alphatrader_passcode_salt');
                               localStorage.removeItem('alphatrader_autolock');
                               setGoogleSheetId('');
                               setGoogleAppsScriptUrl('');
                               setAppPasscode('');
+                              setHasPasscode(false);
                               setIsConnected(false);
                               message.success('Logged out successfully from Google Sheet.');
                             }}
@@ -4049,14 +4121,17 @@ function App() {
                         <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
                           <strong style={{ color: '#ffffff', minWidth: '160px' }}>Enable Passcode Lock:</strong>
                           <Switch 
-                            checked={!!appPasscode} 
+                            checked={hasPasscode} 
                             onChange={(checked) => {
                               if (!checked) {
                                 setAppPasscode('');
+                                setHasPasscode(false);
                                 localStorage.removeItem('alphatrader_passcode');
+                                localStorage.removeItem('alphatrader_passcode_hash');
+                                localStorage.removeItem('alphatrader_passcode_salt');
                                 message.success('Passcode lock disabled.');
                               } else {
-                                message.info('Please enter a passcode below to enable lock.');
+                                message.info('Please enter a passcode below and click Save Security Settings.');
                               }
                             }}
                           />
@@ -4067,15 +4142,7 @@ function App() {
                           <Input.Password 
                             placeholder="Enter 4-6 digit code or password" 
                             value={appPasscode} 
-                            onChange={(e) => {
-                              const val = e.target.value;
-                              setAppPasscode(val);
-                              if (val) {
-                                localStorage.setItem('alphatrader_passcode', val);
-                              } else {
-                                localStorage.removeItem('alphatrader_passcode');
-                              }
-                            }} 
+                            onChange={(e) => setAppPasscode(e.target.value)} 
                             style={{ maxWidth: '400px', flex: 1 }}
                           />
                         </div>
@@ -4104,7 +4171,14 @@ function App() {
                           <Button 
                             type="primary" 
                             onClick={async () => {
-                              localStorage.setItem('alphatrader_passcode', appPasscode);
+                              if (appPasscode.trim()) {
+                                const salt = generateSalt();
+                                const hash = await hashPasscode(appPasscode.trim(), salt);
+                                localStorage.setItem('alphatrader_passcode_hash', hash);
+                                localStorage.setItem('alphatrader_passcode_salt', salt);
+                                localStorage.removeItem('alphatrader_passcode');
+                                setHasPasscode(true);
+                              }
                               localStorage.setItem('alphatrader_autolock', autoLockMinutes.toString());
                               message.success('Security settings saved successfully!');
                             }} 

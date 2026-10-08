@@ -118,5 +118,5 @@ Traders need metrics that help them evaluate edge. The top of the **Dashboard** 
 **A:** Since security parameters are client-side stored:
 1. Right-click anywhere in your browser page &rarr; select **Inspect** &rarr; go to **Application** tab (Chrome/Edge) or **Storage** tab (Firefox).
 2. Expand **Local Storage** on the left &rarr; click on the app domain.
-3. Locate `alphatrader_passcode` and delete the value.
+3. Locate `alphatrader_passcode_hash`, `alphatrader_passcode_salt` (and legacy `alphatrader_passcode` if present), and delete those entries.
 4. Refresh the page to bypass the lock screen.

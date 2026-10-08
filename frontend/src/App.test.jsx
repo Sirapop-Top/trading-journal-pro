@@ -235,9 +235,11 @@ describe('AlphaTrader UAT Full Loop Test Suite', () => {
     const saveSecBtn = screen.getByText('Save Security Settings');
     fireEvent.click(saveSecBtn);
 
-    // Verify it is saved in localStorage
+    // Verify it is saved in localStorage as a salted SHA-256 hash (not plaintext)
     await waitFor(() => {
-      expect(localStorage.getItem('alphatrader_passcode')).toBe('5555');
+      expect(localStorage.getItem('alphatrader_passcode_hash')).toBeTruthy();
+      expect(localStorage.getItem('alphatrader_passcode_salt')).toBeTruthy();
+      expect(localStorage.getItem('alphatrader_passcode')).toBeNull();
     });
 
     // Lock the application manually
