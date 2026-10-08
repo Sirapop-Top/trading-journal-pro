@@ -1,0 +1,640 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>AlphaTrader — Rebalance Demo (Sandbox)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg: #06080f; --panel: #0b0e17; --panel2: #111624; --border: #1f293d;
+    --text: #e6edf7; --muted: #8a96ad; --primary: #00f2fe; --blue: #4facfe;
+    --green: #10b981; --amber: #f59e0b; --red: #f43f5e; --violet: #8b5cf6;
+    --mono: 'JetBrains Mono', monospace;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font-family: 'Outfit', sans-serif; font-size: 14px; }
+  header { position: sticky; top: 0; z-index: 10; display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; padding: 14px 24px; background: rgba(6,8,15,.92); backdrop-filter: blur(8px); border-bottom: 1px solid var(--border); }
+  .brand { font-weight: 800; letter-spacing: .8px; font-size: 18px; }
+  .brand span { color: var(--primary); }
+  .sandbox { font-size: 11px; padding: 2px 8px; border-radius: 999px; background: rgba(245,158,11,.15); color: var(--amber); margin-left: 8px; font-weight: 600; }
+  .controls { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+  label.inline { display: flex; gap: 6px; align-items: center; color: var(--muted); font-size: 12px; }
+  input, select, textarea { background: var(--panel2); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px; font-family: inherit; font-size: 13px; }
+  input[type=number] { font-family: var(--mono); }
+  input:focus, select:focus { outline: 1px solid var(--primary); }
+  button { background: var(--panel2); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 6px 12px; cursor: pointer; font-family: inherit; font-size: 13px; font-weight: 600; }
+  button:hover { border-color: var(--primary); }
+  button.primary { background: linear-gradient(135deg, #00f2fe 0%, #4facfe 100%); color: #031018; border: none; }
+  button.danger { color: var(--red); }
+  button:disabled { opacity: .4; cursor: not-allowed; }
+  button.sm { padding: 3px 8px; font-size: 12px; }
+  main { padding: 20px 24px 60px; display: grid; gap: 18px; grid-template-columns: repeat(12, 1fr); }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 16px; }
+  .card h3 { margin: 0 0 12px; font-size: 15px; display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+  .span-12 { grid-column: span 12; } .span-8 { grid-column: span 8; } .span-4 { grid-column: span 4; } .span-6 { grid-column: span 6; }
+  @media (max-width: 1000px) { .span-8, .span-4, .span-6 { grid-column: span 12; } }
+  .muted { color: var(--muted); } .mono { font-family: var(--mono); }
+  .pos { color: var(--green); } .neg { color: var(--red); }
+  .tag { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; background: rgba(0,242,254,.1); color: var(--primary); }
+  .tag.amber { background: rgba(245,158,11,.14); color: var(--amber); }
+  .tag.red { background: rgba(244,63,94,.14); color: var(--red); }
+  .tag.green { background: rgba(16,185,129,.14); color: var(--green); }
+  .tag.violet { background: rgba(139,92,246,.16); color: #b9a2ff; }
+  .tag.gray { background: rgba(138,150,173,.14); color: var(--muted); }
+  .badge { display: inline-flex; align-items: center; justify-content: center; min-width: 20px; height: 20px; border-radius: 999px; background: var(--red); color: #fff; font-size: 11px; font-weight: 800; padding: 0 6px; }
+  .banner { grid-column: span 12; padding: 10px 14px; border-radius: 12px; background: rgba(244,63,94,.1); border: 1px solid rgba(244,63,94,.35); display: flex; justify-content: space-between; align-items: center; }
+  .pairs { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 14px; }
+  .pair { background: var(--panel2); border: 1px solid var(--border); border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 10px; }
+  .pair.due { border-color: rgba(244,63,94,.6); box-shadow: 0 0 0 1px rgba(244,63,94,.25); }
+  .pair.warn { border-color: rgba(245,158,11,.55); }
+  .pair .title { display: flex; justify-content: space-between; align-items: center; font-weight: 800; }
+  .bar { position: relative; height: 22px; border-radius: 8px; overflow: hidden; display: flex; background: #0a0d16; }
+  .bar .a { background: linear-gradient(90deg, #00f2fe, #4facfe); }
+  .bar .b { background: linear-gradient(90deg, #8b5cf6, #a855f7); }
+  .bar .target { position: absolute; top: -3px; bottom: -3px; width: 2px; background: #fff; box-shadow: 0 0 6px #fff; }
+  .row { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; }
+  .actions { display: flex; flex-wrap: wrap; gap: 6px; }
+  table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  th, td { padding: 7px 8px; border-bottom: 1px solid var(--border); text-align: right; white-space: nowrap; }
+  th { color: var(--muted); font-weight: 600; font-size: 11.5px; text-transform: uppercase; letter-spacing: .4px; }
+  th:first-child, td:first-child, td.l, th.l { text-align: left; }
+  .tablewrap { overflow-x: auto; }
+  .sim-grid { display: grid; gap: 8px; }
+  .sim-row { display: grid; grid-template-columns: 1fr 120px auto; gap: 8px; align-items: center; }
+  .sim-row .btns { display: flex; gap: 4px; }
+  dialog { background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 16px; padding: 0; width: min(760px, 96vw); }
+  dialog::backdrop { background: rgba(0,0,0,.65); backdrop-filter: blur(3px); }
+  .dlg-h { padding: 16px 20px; border-bottom: 1px solid var(--border); font-weight: 800; display: flex; justify-content: space-between; }
+  .dlg-b { padding: 16px 20px; display: grid; gap: 12px; max-height: 72vh; overflow-y: auto; }
+  .dlg-f { padding: 14px 20px; border-top: 1px solid var(--border); display: flex; justify-content: flex-end; gap: 8px; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
+  @media (max-width: 640px) { .grid2, .grid3 { grid-template-columns: 1fr; } }
+  .field { display: flex; flex-direction: column; gap: 4px; }
+  .field > span { color: var(--muted); font-size: 12px; }
+  .leg { border: 1px solid var(--border); border-radius: 12px; padding: 12px; display: grid; gap: 10px; }
+  .leg.sell { border-color: rgba(244,63,94,.4); } .leg.buy { border-color: rgba(16,185,129,.4); }
+  .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+  .seg button { border: none; border-radius: 0; background: transparent; }
+  .seg button.on { background: rgba(0,242,254,.15); color: var(--primary); }
+  .summary { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+  .summary div { background: var(--panel2); border-radius: 10px; padding: 10px; }
+  .summary b { display: block; font-family: var(--mono); font-size: 15px; margin-top: 4px; }
+  .note { font-size: 12px; color: var(--muted); line-height: 1.55; }
+  .note code { font-family: var(--mono); color: var(--primary); }
+  .err { color: var(--red); font-size: 12px; }
+  .warnbox { background: rgba(245,158,11,.08); border: 1px solid rgba(245,158,11,.35); border-radius: 10px; padding: 8px 12px; font-size: 12px; color: var(--amber); }
+  .feeline { display: grid; grid-template-columns: 130px 110px 1fr; gap: 8px; align-items: center; }
+</style>
+</head>
+<body>
+<header>
+  <div><span class="brand">ALPHA<span>TRADER</span></span><span class="sandbox">REBALANCE DEMO · SANDBOX (no Google Sheets)</span></div>
+  <div class="controls">
+    <label class="inline">Portfolio <select id="portfolioSel"></select></label>
+    <label class="inline">Today <input type="date" id="todayInp" /></label>
+    <label class="inline">USD/THB <input type="number" id="fxInp" step="0.01" style="width:90px" /></label>
+    <span class="inline muted">Due pairs <span class="badge" id="dueBadge">0</span></span>
+    <button id="resetBtn" class="danger">Reset demo</button>
+  </div>
+</header>
+
+<main id="app"></main>
+
+<!-- Pair form -->
+<dialog id="pairDlg">
+  <div class="dlg-h"><span id="pairDlgTitle">New Rebalance Pair</span><button class="sm" data-close>✕</button></div>
+  <div class="dlg-b">
+    <div class="grid2">
+      <label class="field"><span>Portfolio (locked — pairs cannot cross portfolios)</span><input id="pf_portfolio" disabled /></label>
+      <label class="field"><span>Pair name</span><input id="pf_name" placeholder="e.g. BTC vs BTC Short 1x" /></label>
+    </div>
+    <div class="grid2">
+      <div class="leg">
+        <b>Asset A</b>
+        <label class="field"><span>Ticker</span><input id="pf_assetA" list="assetList" placeholder="BTC-USD" /></label>
+        <div class="grid2">
+          <label class="field"><span>Type</span><select id="pf_typeA"></select></label>
+          <label class="field"><span>Currency</span><select id="pf_ccyA"><option>USD</option><option>THB</option></select></label>
+        </div>
+      </div>
+      <div class="leg">
+        <b>Asset B</b>
+        <label class="field"><span>Ticker</span><input id="pf_assetB" list="assetList" placeholder="BTC-USD:S1X" /></label>
+        <div class="grid2">
+          <label class="field"><span>Type</span><select id="pf_typeB"></select></label>
+          <label class="field"><span>Currency</span><select id="pf_ccyB"><option>USD</option><option>THB</option></select></label>
+        </div>
+      </div>
+    </div>
+    <datalist id="assetList"></datalist>
+    <div class="note">Tip: choose type <code>Crypto Short 1x</code> to model a USD-margined 1x short. The ticker gets the suffix <code>:S1X</code> automatically and uses the underlying price (e.g. <code>BTC-USD:S1X</code> → price of <code>BTC-USD</code>). Inverse ETFs such as <code>BITI</code> are normal tickers — use type <code>Global Stock</code>.</div>
+    <label class="field"><span>Target allocation — A <b id="pf_tA_lbl">50</b>% / B <b id="pf_tB_lbl">50</b>%</span><input type="range" id="pf_targetA" min="1" max="99" value="50" /></label>
+    <div class="field"><span>Trigger mode</span>
+      <div class="seg" id="pf_mode"><button type="button" data-v="Drift">Drift</button><button type="button" data-v="Schedule">Schedule</button><button type="button" data-v="Manual">Manual</button></div>
+    </div>
+    <div id="pf_driftBox" class="grid2"><label class="field"><span>Drift threshold (%)</span><input type="number" id="pf_threshold" min="0.1" step="0.1" value="5" /></label></div>
+    <div id="pf_schedBox" class="grid2">
+      <label class="field"><span>Frequency</span><select id="pf_freq"><option>Weekly</option><option selected>Monthly</option><option>Quarterly</option><option>Semiannual</option><option>Yearly</option></select></label>
+      <label class="field"><span>Anchor date (first due)</span><input type="date" id="pf_anchor" /></label>
+    </div>
+    <label class="inline"><input type="checkbox" id="pf_customFee" /> Use custom fees for this pair (otherwise defaults by asset type)</label>
+    <div id="pf_feeBox" class="grid2">
+      <div class="feeline"><span class="muted">Fee A</span><select id="pf_feeAmode"><option value="percent">% of value</option><option value="fixed">Fixed amount</option></select><input type="number" id="pf_feeAval" step="0.0001" value="0.1" /></div>
+      <div class="feeline"><span class="muted">Fee B</span><select id="pf_feeBmode"><option value="percent">% of value</option><option value="fixed">Fixed amount</option></select><input type="number" id="pf_feeBval" step="0.0001" value="0.1" /></div>
+    </div>
+    <div id="pf_err" class="err"></div>
+  </div>
+  <div class="dlg-f"><button data-close>Cancel</button><button class="primary" id="pf_save">Save pair</button></div>
+</dialog>
+
+<!-- Calculator -->
+<dialog id="calcDlg">
+  <div class="dlg-h"><span id="calcTitle">Rebalance Calculator</span><button class="sm" data-close>✕</button></div>
+  <div class="dlg-b" id="calcBody"></div>
+  <div class="dlg-f"><button data-close>Cancel</button><button class="primary" id="calcConfirm">Confirm &amp; Log</button></div>
+</dialog>
+
+<script src="./rebalance-engine.js"></script>
+<script>
+(function () {
+  'use strict';
+  const E = window.RebalanceEngine;
+  const TYPES = ['Thai Stock', 'Global Stock', 'Crypto', E.SHORT_TYPE];
+  const STORAGE_KEY = 'alphatrader_rebalance_demo_v1';
+
+  // ------------------------------------------------------------------ seed
+  function seed() {
+    const T = (seq, date, portfolio, assetName, assetType, currency, action, quantity, priceUnit, feeAmount, why) =>
+      ({ id: 'T-' + String(seq).padStart(4, '0'), seq, date, portfolio, assetName, assetType, currency, action, quantity, priceUnit, feeAmount, why: why || '', rebalanceId: '' });
+    return {
+      today: '2026-10-07',
+      rates: { THB: 1, USD: 35 },
+      activePortfolio: 'Crypto Hedge',
+      portfolios: ['Crypto Hedge', 'Thai + Global'],
+      prices: { 'BTC-USD': 62000, 'ETH-USD': 3000, 'PAXG-USD': 2450, 'PTT.BK': 34, 'GLD': 220 },
+      trades: [
+        T(1, '2026-06-01', 'Crypto Hedge', 'BTC-USD', 'Crypto', 'USD', 'Buy', 0.5, 60000, 30, 'Core'),
+        T(2, '2026-06-01', 'Crypto Hedge', 'BTC-USD:S1X', E.SHORT_TYPE, 'USD', 'Buy', 0.5, 60000, 15, 'Hedge (open short 1x)'),
+        T(3, '2026-06-02', 'Crypto Hedge', 'ETH-USD', 'Crypto', 'USD', 'Buy', 5, 3000, 15, 'Core'),
+        T(4, '2026-06-02', 'Crypto Hedge', 'PAXG-USD', 'Crypto', 'USD', 'Buy', 3, 2400, 7.2, 'Gold hedge'),
+        T(5, '2026-06-05', 'Thai + Global', 'PTT.BK', 'Thai Stock', 'THB', 'Buy', 3000, 34, 160, 'Dividend'),
+        T(6, '2026-06-05', 'Thai + Global', 'GLD', 'Global Stock', 'USD', 'Buy', 50, 220, 1, 'Gold'),
+      ],
+      pairs: [
+        { pairId: 'RP-0001', portfolio: 'Crypto Hedge', name: 'BTC vs BTC Short 1x', assetA: 'BTC-USD', assetAType: 'Crypto', assetACurrency: 'USD', assetB: 'BTC-USD:S1X', assetBType: E.SHORT_TYPE, assetBCurrency: 'USD', targetA: 50, mode: 'Drift', driftThreshold: 5, scheduleFrequency: 'Monthly', scheduleAnchor: '', lastRebalanced: '', status: 'Active', customFee: true, feeA: { mode: 'percent', value: 0.1 }, feeB: { mode: 'percent', value: 0.05 } },
+        { pairId: 'RP-0002', portfolio: 'Crypto Hedge', name: 'ETH vs Gold', assetA: 'ETH-USD', assetAType: 'Crypto', assetACurrency: 'USD', assetB: 'PAXG-USD', assetBType: 'Crypto', assetBCurrency: 'USD', targetA: 60, mode: 'Schedule', driftThreshold: 5, scheduleFrequency: 'Monthly', scheduleAnchor: '2026-07-01', lastRebalanced: '2026-09-01', status: 'Active', customFee: false },
+        { pairId: 'RP-0003', portfolio: 'Thai + Global', name: 'PTT vs GLD', assetA: 'PTT.BK', assetAType: 'Thai Stock', assetACurrency: 'THB', assetB: 'GLD', assetBType: 'Global Stock', assetBCurrency: 'USD', targetA: 50, mode: 'Manual', driftThreshold: 5, scheduleFrequency: 'Monthly', scheduleAnchor: '', lastRebalanced: '', status: 'Active', customFee: false },
+      ],
+      log: [],
+      seq: { T: 6, RP: 3, RB: 0 },
+      feeDefaults: {
+        'Thai Stock': { mode: 'percent', value: 0.157 },
+        'Global Stock': { mode: 'fixed', value: 1 },
+        'Crypto': { mode: 'percent', value: 0.1 },
+        [E.SHORT_TYPE]: { mode: 'percent', value: 0.05 },
+      },
+    };
+  }
+
+  let S = load() || seed();
+  function load() { try { return JSON.parse(localStorage.getItem(STORAGE_KEY)); } catch (e) { return null; } }
+  function save() { localStorage.setItem(STORAGE_KEY, JSON.stringify(S)); }
+
+  // ------------------------------------------------------------------ helpers
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const fmt = (n, d = 2) => (n === null || n === undefined || !isFinite(n)) ? '—' : Number(n).toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
+  const fmtQ = (n) => (n === null || n === undefined) ? '—' : Number(n).toLocaleString('en-US', { maximumFractionDigits: 8 });
+  const thb = (n) => '฿' + fmt(n, 0);
+  const pnlCls = (n) => n > 0.005 ? 'pos' : (n < -0.005 ? 'neg' : '');
+  const nextId = (k, prefix, pad = 4) => { S.seq[k] += 1; return prefix + '-' + String(S.seq[k]).padStart(pad, '0'); };
+  const portfolioPairs = () => S.pairs.filter((p) => p.portfolio === S.activePortfolio);
+  const feesForPair = (p) => p.customFee ? { A: p.feeA, B: p.feeB } : { A: S.feeDefaults[p.assetAType], B: S.feeDefaults[p.assetBType] };
+  const sevTag = (sev) => sev === 'due' ? 'red' : (sev === 'warn' ? 'amber' : 'green');
+  const modeTag = (m) => m === 'Drift' ? 'tag' : (m === 'Schedule' ? 'tag violet' : 'tag gray');
+
+  function underlyingsInPortfolio() {
+    const set = new Set();
+    S.trades.filter((t) => t.portfolio === S.activePortfolio).forEach((t) => set.add(E.underlyingOf(t.assetName)));
+    portfolioPairs().forEach((p) => { set.add(E.underlyingOf(p.assetA)); set.add(E.underlyingOf(p.assetB)); });
+    return [...set];
+  }
+
+  function allDueCount() {
+    return S.pairs.reduce((n, p) => {
+      const st = E.computePairState(p, S.trades, S.prices, S.rates);
+      return n + (E.evaluateDue(p, st, S.today).due ? 1 : 0);
+    }, 0);
+  }
+
+  // ------------------------------------------------------------------ render
+  function render() {
+    // header
+    $('portfolioSel').innerHTML = S.portfolios.map((p) => `<option ${p === S.activePortfolio ? 'selected' : ''}>${esc(p)}</option>`).join('');
+    $('todayInp').value = S.today;
+    $('fxInp').value = S.rates.USD;
+    const dueAll = allDueCount();
+    $('dueBadge').textContent = dueAll;
+    $('dueBadge').style.background = dueAll ? 'var(--red)' : 'var(--green)';
+
+    const pairs = portfolioPairs();
+    const states = pairs.map((p) => {
+      const st = E.computePairState(p, S.trades, S.prices, S.rates);
+      return { p, st, due: E.evaluateDue(p, st, S.today) };
+    });
+    const dueHere = states.filter((x) => x.due.due).length;
+
+    let html = '';
+    if (dueHere) html += `<div class="banner"><span>⚠️ <b>${dueHere}</b> pair(s) in <b>${esc(S.activePortfolio)}</b> need rebalancing</span><span class="muted">Manual-mode pairs never alert</span></div>`;
+
+    // Pairs
+    html += `<section class="card span-8"><h3>Rebalance Pairs <span><button class="primary sm" data-act="newPair">+ New Pair</button></span></h3>`;
+    html += pairs.length ? `<div class="pairs">${states.map(pairCard).join('')}</div>` : `<div class="muted">No pairs in this portfolio yet.</div>`;
+    html += overlapWarning(pairs);
+    html += `</section>`;
+
+    // Simulator
+    html += `<section class="card span-4"><h3>Market Simulator <span class="muted" style="font-size:11px;font-weight:400">edit prices to create drift</span></h3><div class="sim-grid">`;
+    underlyingsInPortfolio().forEach((u) => {
+      html += `<div class="sim-row"><span class="mono">${esc(u)}</span><input type="number" step="any" data-price="${esc(u)}" value="${S.prices[u] ?? ''}" placeholder="price" />
+        <span class="btns"><button class="sm" data-move="${esc(u)}" data-pct="-10">−10%</button><button class="sm" data-move="${esc(u)}" data-pct="10">+10%</button></span></div>`;
+    });
+    html += `</div><div class="note" style="margin-top:12px">Short 1x value per unit = <code>2 × entry − price</code> (USD-margined, collateral = notional). Liquidation when price ≥ 2 × entry. Funding/borrow fees are not modelled here — in the real app they go to <code>Cash_Ledger</code> (Kind = Funding).</div></section>`;
+
+    // Holdings
+    html += holdingsCard();
+
+    // Fee defaults
+    html += feeDefaultsCard();
+
+    // Log
+    html += logCard();
+
+    // Journal
+    html += journalCard();
+
+    $('app').innerHTML = html;
+  }
+
+  function pairCard({ p, st, due }) {
+    const pctA = st.pctA, tA = Number(p.targetA);
+    const fees = feesForPair(p);
+    const feeTxt = (f) => !f ? '—' : (f.mode === 'fixed' ? fmt(f.value, 2) + ' fixed' : fmt(f.value, 3) + '%');
+    const modeLine = p.mode === 'Drift' ? `Threshold ±${p.driftThreshold}%`
+      : p.mode === 'Schedule' ? `${p.scheduleFrequency} · next ${due.nextDueDate || '—'}` : 'Rebalance only when you click';
+    return `<div class="pair ${due.severity === 'due' ? 'due' : (due.severity === 'warn' ? 'warn' : '')}">
+      <div class="title"><span>${esc(p.name)} <span class="muted mono" style="font-size:11px">${p.pairId}</span></span>
+        <span><span class="${modeTag(p.mode)}">${p.mode}</span> ${p.status === 'Paused' ? '<span class="tag gray">Paused</span>' : `<span class="tag ${sevTag(due.severity)}">${due.due ? 'DUE' : due.severity === 'warn' ? 'Soon' : 'OK'}</span>`}</span></div>
+      <div class="bar"><div class="a" style="width:${pctA}%"></div><div class="b" style="width:${st.total > 0 ? 100 - pctA : 0}%"></div><div class="target" style="left:calc(${tA}% - 1px)"></div></div>
+      <div class="row"><span><b style="color:var(--primary)">A</b> ${esc(p.assetA)} ${E.isShort(p.assetA, p.assetAType) ? '<span class="tag red">SHORT 1x</span>' : ''}</span><span class="mono">${fmt(pctA, 2)}% / target ${tA}% · ${thb(st.valueA)}</span></div>
+      <div class="row"><span><b style="color:#b9a2ff">B</b> ${esc(p.assetB)} ${E.isShort(p.assetB, p.assetBType) ? '<span class="tag red">SHORT 1x</span>' : ''}</span><span class="mono">${fmt(st.pctB, 2)}% / target ${100 - tA}% · ${thb(st.valueB)}</span></div>
+      <div class="row"><span class="muted">Drift</span><span class="mono ${Math.abs(st.drift) >= (p.driftThreshold || 5) ? 'neg' : ''}">${st.drift >= 0 ? '+' : ''}${fmt(st.drift, 2)}%</span></div>
+      <div class="row"><span class="muted">${modeLine}</span><span class="muted">${esc(due.reason)}</span></div>
+      <div class="row"><span class="muted">Fees ${p.customFee ? '(custom)' : '(defaults)'}</span><span class="muted mono">A ${feeTxt(fees.A)} · B ${feeTxt(fees.B)}</span></div>
+      <div class="row"><span class="muted">Last rebalanced</span><span class="mono">${p.lastRebalanced || '—'}</span></div>
+      ${st.missingPrice ? '<div class="warnbox">Missing price — set it in the Market Simulator.</div>' : ''}
+      <div class="actions">
+        <button class="primary sm" data-act="calc" data-id="${p.pairId}" ${p.status === 'Paused' ? 'disabled' : ''}>Rebalance now</button>
+        <button class="sm" data-act="editPair" data-id="${p.pairId}">Edit</button>
+        <button class="sm" data-act="togglePair" data-id="${p.pairId}">${p.status === 'Paused' ? 'Resume' : 'Pause'}</button>
+        <button class="sm danger" data-act="deletePair" data-id="${p.pairId}">Delete</button>
+      </div>
+    </div>`;
+  }
+
+  function overlapWarning(pairs) {
+    const count = {};
+    pairs.forEach((p) => [p.assetA, p.assetB].forEach((a) => { count[a] = (count[a] || 0) + 1; }));
+    const dup = Object.keys(count).filter((k) => count[k] > 1);
+    return dup.length ? `<div class="warnbox" style="margin-top:12px">${dup.map(esc).join(', ')} appear(s) in more than one pair. Each pair's % is computed only within that pair, so rebalancing one pair changes the other.</div>` : '';
+  }
+
+  function holdingsCard() {
+    const H = E.computeHoldings(S.trades, S.activePortfolio);
+    const rows = Object.values(H).map((h) => {
+      const price = E.priceOf(h.assetName, S.prices);
+      const fx = E.fxOf(h.currency, S.rates);
+      const val = E.valueLocal(h, price);
+      const unreal = val - h.costBasis;
+      return `<tr><td class="l mono">${esc(h.assetName)} ${h.short ? '<span class="tag red">SHORT 1x</span>' : ''}</td><td class="l">${esc(h.assetType)}</td>
+        <td class="mono">${fmtQ(h.qty)}</td><td class="mono">${fmt(h.short ? E.entryPrice(h) : E.wac(h))}</td><td class="mono">${fmt(price)}</td>
+        <td class="mono">${fmt(h.qty ? E.unitValue(h, price) : 0)}</td><td class="mono">${thb(val * fx)}</td>
+        <td class="mono ${pnlCls(unreal)}">${thb(unreal * fx)}</td><td class="mono ${pnlCls(h.realized)}">${thb(h.realized * fx)}</td></tr>`;
+    }).join('');
+    return `<section class="card span-12"><h3>Holdings — ${esc(S.activePortfolio)} <span class="muted" style="font-size:11px;font-weight:400">WAC cost basis (same as the real app)</span></h3>
+      <div class="tablewrap"><table><thead><tr><th class="l">Asset</th><th class="l">Type</th><th>Qty</th><th>Avg cost / Entry</th><th>Price</th><th>Unit value</th><th>Value (THB)</th><th>Unrealized</th><th>Realized</th></tr></thead>
+      <tbody>${rows || '<tr><td colspan="9" class="l muted">No holdings</td></tr>'}</tbody></table></div></section>`;
+  }
+
+  function feeDefaultsCard() {
+    const rows = TYPES.map((t) => {
+      const f = S.feeDefaults[t] || { mode: 'percent', value: 0 };
+      return `<div class="feeline"><span>${esc(t)}</span>
+        <select data-feemode="${esc(t)}"><option value="percent" ${f.mode === 'percent' ? 'selected' : ''}>% of value</option><option value="fixed" ${f.mode === 'fixed' ? 'selected' : ''}>Fixed amount</option></select>
+        <input type="number" step="0.0001" min="0" data-feeval="${esc(t)}" value="${f.value}" /></div>`;
+    }).join('');
+    return `<section class="card span-6"><h3>Default Fees by Asset Type <span class="muted" style="font-size:11px;font-weight:400">user-editable · used when a pair has no custom fee</span></h3>
+      <div class="sim-grid">${rows}</div>
+      <div class="note" style="margin-top:10px">Fixed amounts are in the asset's own currency (THB for Thai Stock, USD for others). Every fee can still be overridden per pair and per trade inside the calculator.</div></section>`;
+  }
+
+  function logCard() {
+    const rows = S.log.filter((l) => l.portfolio === S.activePortfolio).slice().reverse().map((l) => `<tr>
+      <td class="l mono">${l.rebalanceId}</td><td class="l">${esc(l.pairName)}</td><td class="l">${l.executedOn}</td><td class="l"><span class="${modeTag(l.trigger)}">${l.trigger}</span></td>
+      <td class="l">Sell ${fmtQ(l.sellQty)} ${esc(l.sellAsset)} → Buy ${fmtQ(l.buyQty)} ${esc(l.buyAsset)}</td>
+      <td class="mono">${fmt(l.beforePctA)}% → ${fmt(l.afterPctA)}%</td><td class="mono">${thb(l.valueMovedTHB)}</td><td class="mono ${pnlCls(l.realizedTHB)}">${thb(l.realizedTHB)}</td>
+      <td class="l"><span class="tag ${l.status === 'Done' ? 'green' : 'gray'}">${l.status}</span></td>
+      <td>${l.status === 'Done' ? `<button class="sm danger" data-act="revert" data-id="${l.rebalanceId}">Revert</button>` : ''}</td></tr>`).join('');
+    return `<section class="card span-6"><h3>Rebalance History</h3><div class="tablewrap"><table>
+      <thead><tr><th class="l">ID</th><th class="l">Pair</th><th class="l">Date</th><th class="l">Trigger</th><th class="l">Orders</th><th>A% before→after</th><th>Moved</th><th>Realized</th><th class="l">Status</th><th></th></tr></thead>
+      <tbody>${rows || '<tr><td colspan="10" class="l muted">No rebalances yet</td></tr>'}</tbody></table></div></section>`;
+  }
+
+  function journalCard() {
+    const rows = S.trades.filter((t) => t.portfolio === S.activePortfolio).slice().sort((a, b) => (b.date === a.date ? b.seq - a.seq : (b.date > a.date ? 1 : -1))).map((t) => `<tr>
+      <td class="l mono">${t.id}</td><td class="l">${t.date}</td><td class="l mono">${esc(t.assetName)}</td>
+      <td class="l"><span class="tag ${t.action === 'Buy' ? 'green' : 'red'}">${t.action}${E.isShort(t.assetName, t.assetType) ? (t.action === 'Buy' ? ' (open short)' : ' (cover)') : ''}</span></td>
+      <td class="mono">${fmtQ(t.quantity)}</td><td class="mono">${fmt(t.priceUnit)}</td><td class="mono">${fmt(t.feeAmount)}</td><td class="l">${esc(t.currency)}</td>
+      <td class="l">${t.rebalanceId ? `<span class="tag violet">${t.rebalanceId}</span>` : ''} <span class="muted">${esc(t.why)}</span></td>
+      <td><button class="sm danger" data-act="delTrade" data-id="${t.id}">Delete</button></td></tr>`).join('');
+    return `<section class="card span-12"><h3>Trading Journal — ${esc(S.activePortfolio)}</h3><div class="tablewrap"><table>
+      <thead><tr><th class="l">ID</th><th class="l">Date</th><th class="l">Asset</th><th class="l">Action</th><th>Qty</th><th>Price</th><th>Fee</th><th class="l">Ccy</th><th class="l">Rebalance / Why</th><th></th></tr></thead>
+      <tbody>${rows || '<tr><td colspan="10" class="l muted">No trades</td></tr>'}</tbody></table></div></section>`;
+  }
+
+  // ------------------------------------------------------------------ pair form
+  let editingPairId = null;
+  let formMode = 'Drift';
+
+  function openPairForm(pairId) {
+    editingPairId = pairId || null;
+    const p = pairId ? S.pairs.find((x) => x.pairId === pairId) : null;
+    $('pairDlgTitle').textContent = p ? 'Edit Pair ' + p.pairId : 'New Rebalance Pair';
+    ['pf_typeA', 'pf_typeB'].forEach((id) => { $(id).innerHTML = TYPES.map((t) => `<option>${t}</option>`).join(''); });
+    const assets = new Set(); S.trades.filter((t) => t.portfolio === S.activePortfolio).forEach((t) => assets.add(t.assetName));
+    $('assetList').innerHTML = [...assets].map((a) => `<option value="${esc(a)}">`).join('');
+    $('pf_portfolio').value = S.activePortfolio;
+    $('pf_name').value = p ? p.name : '';
+    $('pf_assetA').value = p ? p.assetA : '';
+    $('pf_assetB').value = p ? p.assetB : '';
+    $('pf_typeA').value = p ? p.assetAType : 'Crypto';
+    $('pf_typeB').value = p ? p.assetBType : 'Crypto';
+    $('pf_ccyA').value = p ? p.assetACurrency : 'USD';
+    $('pf_ccyB').value = p ? p.assetBCurrency : 'USD';
+    $('pf_targetA').value = p ? p.targetA : 50;
+    $('pf_threshold').value = p ? p.driftThreshold : 5;
+    $('pf_freq').value = p ? p.scheduleFrequency : 'Monthly';
+    $('pf_anchor').value = (p && p.scheduleAnchor) || S.today;
+    $('pf_customFee').checked = p ? !!p.customFee : false;
+    const fa = (p && p.feeA) || { mode: 'percent', value: 0.1 }, fb = (p && p.feeB) || { mode: 'percent', value: 0.1 };
+    $('pf_feeAmode').value = fa.mode; $('pf_feeAval').value = fa.value;
+    $('pf_feeBmode').value = fb.mode; $('pf_feeBval').value = fb.value;
+    formMode = p ? p.mode : 'Drift';
+    $('pf_err').textContent = '';
+    syncPairForm();
+    $('pairDlg').showModal();
+  }
+
+  function syncPairForm() {
+    const a = Number($('pf_targetA').value);
+    $('pf_tA_lbl').textContent = a; $('pf_tB_lbl').textContent = 100 - a;
+    [...$('pf_mode').children].forEach((b) => b.classList.toggle('on', b.dataset.v === formMode));
+    $('pf_driftBox').style.display = formMode === 'Drift' ? '' : 'none';
+    $('pf_schedBox').style.display = formMode === 'Schedule' ? '' : 'none';
+    $('pf_feeBox').style.display = $('pf_customFee').checked ? '' : 'none';
+  }
+
+  function normTicker(raw, type) {
+    let t = String(raw || '').trim().toUpperCase();
+    if (!t) return t;
+    if (type === E.SHORT_TYPE && !t.endsWith(E.SHORT_SUFFIX)) t += E.SHORT_SUFFIX;
+    if (type !== E.SHORT_TYPE && t.endsWith(E.SHORT_SUFFIX)) t = t.slice(0, -E.SHORT_SUFFIX.length);
+    if (type === 'Thai Stock' && !t.endsWith('.BK')) t += '.BK';
+    if ((type === 'Crypto' || type === E.SHORT_TYPE) && E.underlyingOf(t).indexOf('-') === -1) {
+      t = type === E.SHORT_TYPE ? E.underlyingOf(t) + '-USD' + E.SHORT_SUFFIX : t + '-USD';
+    }
+    return t;
+  }
+
+  function savePair() {
+    const typeA = $('pf_typeA').value, typeB = $('pf_typeB').value;
+    const assetA = normTicker($('pf_assetA').value, typeA), assetB = normTicker($('pf_assetB').value, typeB);
+    const targetA = Number($('pf_targetA').value);
+    const errs = [];
+    if (!assetA || !assetB) errs.push('Both assets are required.');
+    if (assetA && assetA === assetB) errs.push('Asset A and Asset B must be different.');
+    if (!(targetA >= 1 && targetA <= 99)) errs.push('Target A must be between 1 and 99.');
+    if (formMode === 'Drift' && !(Number($('pf_threshold').value) > 0)) errs.push('Drift threshold must be > 0.');
+    if (formMode === 'Schedule' && !$('pf_anchor').value) errs.push('Anchor date is required for Schedule mode.');
+    const dup = S.pairs.find((p) => p.portfolio === S.activePortfolio && p.pairId !== editingPairId &&
+      ((p.assetA === assetA && p.assetB === assetB) || (p.assetA === assetB && p.assetB === assetA)));
+    if (dup) errs.push('This pair already exists in this portfolio (' + dup.pairId + ').');
+    if ($('pf_customFee').checked && (Number($('pf_feeAval').value) < 0 || Number($('pf_feeBval').value) < 0)) errs.push('Fees cannot be negative.');
+    if (errs.length) { $('pf_err').innerHTML = errs.map(esc).join('<br>'); return; }
+
+    const data = {
+      portfolio: S.activePortfolio, // enforced: same portfolio only
+      name: $('pf_name').value.trim() || (assetA + ' vs ' + assetB),
+      assetA, assetAType: typeA, assetACurrency: typeA === 'Thai Stock' ? 'THB' : $('pf_ccyA').value,
+      assetB, assetBType: typeB, assetBCurrency: typeB === 'Thai Stock' ? 'THB' : $('pf_ccyB').value,
+      targetA, mode: formMode, driftThreshold: Number($('pf_threshold').value) || 5,
+      scheduleFrequency: $('pf_freq').value, scheduleAnchor: formMode === 'Schedule' ? $('pf_anchor').value : '',
+      customFee: $('pf_customFee').checked,
+      feeA: { mode: $('pf_feeAmode').value, value: Number($('pf_feeAval').value) || 0 },
+      feeB: { mode: $('pf_feeBmode').value, value: Number($('pf_feeBval').value) || 0 },
+    };
+    if (editingPairId) Object.assign(S.pairs.find((p) => p.pairId === editingPairId), data);
+    else S.pairs.push(Object.assign({ pairId: nextId('RP', 'RP'), lastRebalanced: '', status: 'Active' }, data));
+    [assetA, assetB].forEach((a) => { const u = E.underlyingOf(a); if (!(u in S.prices)) S.prices[u] = null; });
+    save(); $('pairDlg').close(); render();
+  }
+
+  // ------------------------------------------------------------------ calculator
+  let calc = null; // { pair, order, legs: { sell, buy }, trigger }
+
+  function openCalc(pairId) {
+    const pair = S.pairs.find((p) => p.pairId === pairId);
+    const st = E.computePairState(pair, S.trades, S.prices, S.rates);
+    const due = E.evaluateDue(pair, st, S.today);
+    const fees = feesForPair(pair);
+    const order = E.computeOrder(pair, S.trades, S.prices, S.rates, { fees, date: S.today });
+    let sell, buy, sellSide;
+    if (!order.noAction) { sell = Object.assign({}, order.sell); buy = Object.assign({}, order.buy); sellSide = order.direction[0]; }
+    else {
+      sellSide = st.drift >= 0 ? 'A' : 'B';
+      const mk = (side, action) => side === 'A'
+        ? { assetName: pair.assetA, assetType: pair.assetAType, currency: pair.assetACurrency, priceUnit: st.priceA || 0 }
+        : { assetName: pair.assetB, assetType: pair.assetBType, currency: pair.assetBCurrency, priceUnit: st.priceB || 0 };
+      sell = Object.assign(mk(sellSide), { action: 'Sell', quantity: 0, feeAmount: 0, portfolio: pair.portfolio });
+      buy = Object.assign(mk(sellSide === 'A' ? 'B' : 'A'), { action: 'Buy', quantity: 0, feeAmount: 0, portfolio: pair.portfolio });
+    }
+    const buySide = sellSide === 'A' ? 'B' : 'A';
+    calc = {
+      pair, order, st,
+      trigger: due.due ? pair.mode : 'Manual',
+      date: S.today,
+      reason: due.due ? due.reason : 'Manual rebalance',
+      sell: Object.assign(sell, { fee: Object.assign({}, fees[sellSide] || { mode: 'percent', value: 0 }) }),
+      buy: Object.assign(buy, { fee: Object.assign({}, fees[buySide] || { mode: 'percent', value: 0 }) }),
+    };
+    $('calcTitle').textContent = 'Rebalance — ' + pair.name + ' (' + pair.pairId + ')';
+    renderCalc();
+    $('calcDlg').showModal();
+  }
+
+  function legFeeAmt(leg) { return Math.round(E.feeAmount(leg.fee, Number(leg.quantity) || 0, Number(leg.priceUnit) || 0) * 100) / 100; }
+
+  function legHtml(kind, leg) {
+    const short = E.isShort(leg.assetName, leg.assetType);
+    const verb = kind === 'sell' ? (short ? 'COVER SHORT' : 'SELL') : (short ? 'OPEN / ADD SHORT' : 'BUY');
+    return `<div class="leg ${kind}">
+      <div class="row"><b>${verb} · <span class="mono">${esc(leg.assetName)}</span></b><span class="muted">${esc(leg.assetType)} · ${esc(leg.currency)}</span></div>
+      <div class="grid3">
+        <label class="field"><span>Quantity</span><input type="number" step="any" min="0" data-leg="${kind}" data-f="quantity" value="${leg.quantity}" /></label>
+        <label class="field"><span>${short ? 'Underlying price' : 'Price / unit'}</span><input type="number" step="any" min="0" data-leg="${kind}" data-f="priceUnit" value="${leg.priceUnit}" /></label>
+        <label class="field"><span>Fee amount (${esc(leg.currency)})</span><input type="number" disabled value="${legFeeAmt(leg)}" /></label>
+      </div>
+      <div class="feeline"><span class="muted">Fee for this trade</span>
+        <select data-leg="${kind}" data-f="feeMode"><option value="percent" ${leg.fee.mode === 'percent' ? 'selected' : ''}>% of value</option><option value="fixed" ${leg.fee.mode === 'fixed' ? 'selected' : ''}>Fixed amount</option></select>
+        <input type="number" step="any" min="0" data-leg="${kind}" data-f="feeValue" value="${leg.fee.value}" /></div>
+    </div>`;
+  }
+
+  function renderCalc() {
+    const c = calc;
+    const legs = [legForEngine(c.sell), legForEngine(c.buy)];
+    const valid = legs.every((l) => l.quantity > 0 && l.priceUnit > 0);
+    const held = (E.computeHoldings(S.trades, c.pair.portfolio)[c.sell.assetName] || { qty: 0 }).qty;
+    const overSell = Number(c.sell.quantity) > held + 1e-9;
+    const preview = valid ? E.previewAfter(c.pair, S.trades, legs, S.prices, S.rates) : null;
+    $('calcConfirm').disabled = !valid || overSell;
+    let h = '';
+    if (c.order.noAction) h += `<div class="warnbox">${esc(c.order.message)} You can still enter quantities manually.</div>`;
+    (c.order.warnings || []).forEach((w) => { h += `<div class="warnbox">${esc(w)}</div>`; });
+    if (overSell) h += `<div class="err">Sell quantity exceeds holding (${fmtQ(held)}).</div>`;
+    h += `<div class="summary">
+      <div><span class="muted">A% before</span><b>${fmt(c.st.pctA)}%</b></div>
+      <div><span class="muted">Target A%</span><b>${c.pair.targetA}%</b></div>
+      <div><span class="muted">A% after</span><b>${preview ? fmt(preview.pctA) + '%' : '—'}</b></div>
+      <div><span class="muted">Est. realized P&amp;L</span><b class="${preview ? pnlCls(preview.realizedTHB) : ''}">${preview ? thb(preview.realizedTHB) : '—'}</b></div></div>`;
+    h += legHtml('sell', c.sell) + legHtml('buy', c.buy);
+    h += `<div class="row"><button class="sm" id="autoSize">↻ Auto-size buy leg from sell proceeds</button><span class="muted">Trigger: <span class="${modeTag(c.trigger)}">${c.trigger}</span></span></div>`;
+    h += `<div class="grid2"><label class="field"><span>Date</span><input type="date" id="calcDate" value="${c.date}" /></label>
+      <label class="field"><span>Reason</span><input id="calcReason" value="${esc(c.reason)}" /></label></div>`;
+    h += `<div class="note">Both trades will be written to the Journal with the same Rebalance ID. Realized P&amp;L uses WAC. ${E.isShort(c.sell.assetName, c.sell.assetType) ? 'Covering a 1x short returns <code>qty × (2 × entry − price)</code> minus fee.' : ''}</div>`;
+    $('calcBody').innerHTML = h;
+  }
+
+  function legForEngine(leg) {
+    return {
+      portfolio: calc.pair.portfolio, date: calc.date, assetName: leg.assetName, assetType: leg.assetType, currency: leg.currency,
+      action: leg.action, quantity: Number(leg.quantity) || 0, priceUnit: Number(leg.priceUnit) || 0, feeAmount: legFeeAmt(leg),
+    };
+  }
+
+  function autoSizeBuy() {
+    const c = calc;
+    const H = E.computeHoldings(S.trades, c.pair.portfolio);
+    const hS = H[c.sell.assetName] || { qty: 0, short: E.isShort(c.sell.assetName, c.sell.assetType), entryNotional: 0 };
+    const uv = E.unitValue(hS, Number(c.sell.priceUnit));
+    const fxS = E.fxOf(c.sell.currency, S.rates), fxB = E.fxOf(c.buy.currency, S.rates);
+    const proceedsTHB = ((Number(c.sell.quantity) || 0) * uv - legFeeAmt(c.sell)) * fxS;
+    c.buy.quantity = E.sizeBuyQty(proceedsTHB, Number(c.buy.priceUnit), fxB, c.buy.assetType, c.buy.fee);
+    renderCalc();
+  }
+
+  function confirmCalc() {
+    const c = calc;
+    const rbId = nextId('RB', 'RB');
+    const legs = [legForEngine(c.sell), legForEngine(c.buy)];
+    const preview = E.previewAfter(c.pair, S.trades, legs, S.prices, S.rates);
+    const H = E.computeHoldings(S.trades, c.pair.portfolio);
+    const hS = H[c.sell.assetName];
+    const proceedsTHB = (legs[0].quantity * E.unitValue(hS, legs[0].priceUnit) - legs[0].feeAmount) * E.fxOf(legs[0].currency, S.rates);
+    legs.forEach((l) => {
+      S.seq.T += 1;
+      S.trades.push(Object.assign(l, { id: 'T-' + String(S.seq.T).padStart(4, '0'), seq: S.seq.T, why: 'Rebalance ' + c.pair.name, rebalanceId: rbId }));
+    });
+    S.log.push({
+      rebalanceId: rbId, pairId: c.pair.pairId, pairName: c.pair.name, portfolio: c.pair.portfolio, executedOn: c.date, trigger: c.trigger,
+      sellAsset: legs[0].assetName, sellQty: legs[0].quantity, sellPrice: legs[0].priceUnit, sellFee: legs[0].feeAmount,
+      buyAsset: legs[1].assetName, buyQty: legs[1].quantity, buyPrice: legs[1].priceUnit, buyFee: legs[1].feeAmount,
+      valueMovedTHB: proceedsTHB, beforePctA: c.st.pctA, targetA: c.pair.targetA, afterPctA: preview.pctA, realizedTHB: preview.realizedTHB,
+      reason: c.reason, status: 'Done',
+    });
+    c.pair.lastRebalanced = recomputeLast(c.pair.pairId);
+    save(); $('calcDlg').close(); render();
+  }
+
+  function recomputeLast(pairId) {
+    return S.log.filter((l) => l.pairId === pairId && l.status === 'Done').reduce((m, l) => (l.executedOn > m ? l.executedOn : m), '');
+  }
+
+  function revert(rbId) {
+    if (!confirm('Revert ' + rbId + '? Both trades will be removed from the Journal. The log row is kept as "Reverted".')) return;
+    S.trades = S.trades.filter((t) => t.rebalanceId !== rbId);
+    const l = S.log.find((x) => x.rebalanceId === rbId); l.status = 'Reverted';
+    const p = S.pairs.find((x) => x.pairId === l.pairId); if (p) p.lastRebalanced = recomputeLast(p.pairId);
+    save(); render();
+  }
+
+  // ------------------------------------------------------------------ events
+  document.addEventListener('click', (e) => {
+    const el = e.target.closest('[data-act],[data-move],[data-close],#autoSize,#pf_save,#calcConfirm,#resetBtn,#pf_mode button');
+    if (!el) return;
+    if (el.matches('[data-close]')) { el.closest('dialog').close(); return; }
+    if (el.id === 'resetBtn') { if (confirm('Reset demo data?')) { S = seed(); save(); render(); } return; }
+    if (el.id === 'pf_save') return savePair();
+    if (el.id === 'calcConfirm') return confirmCalc();
+    if (el.id === 'autoSize') return autoSizeBuy();
+    if (el.matches('#pf_mode button')) { formMode = el.dataset.v; syncPairForm(); return; }
+    if (el.dataset.move) {
+      const u = el.dataset.move; if (S.prices[u] == null) return;
+      S.prices[u] = Math.round(S.prices[u] * (1 + Number(el.dataset.pct) / 100) * 10000) / 10000; save(); render(); return;
+    }
+    const id = el.dataset.id;
+    switch (el.dataset.act) {
+      case 'newPair': return openPairForm();
+      case 'editPair': return openPairForm(id);
+      case 'calc': return openCalc(id);
+      case 'togglePair': { const p = S.pairs.find((x) => x.pairId === id); p.status = p.status === 'Paused' ? 'Active' : 'Paused'; save(); return render(); }
+      case 'deletePair': if (confirm('Delete pair ' + id + '? History is kept.')) { S.pairs = S.pairs.filter((x) => x.pairId !== id); save(); render(); } return;
+      case 'revert': return revert(id);
+      case 'delTrade': {
+        const t = S.trades.find((x) => x.id === id);
+        if (t.rebalanceId) { return revert(t.rebalanceId); } // cannot delete a single leg
+        if (confirm('Delete ' + id + '?')) { S.trades = S.trades.filter((x) => x.id !== id); save(); render(); }
+        return;
+      }
+    }
+  });
+
+  document.addEventListener('change', (e) => {
+    const el = e.target;
+    if (el.id === 'portfolioSel') { S.activePortfolio = el.value; save(); return render(); }
+    if (el.id === 'todayInp') { S.today = el.value; save(); return render(); }
+    if (el.id === 'fxInp') { S.rates.USD = Number(el.value) || 35; save(); return render(); }
+    if (el.dataset.price) { const v = Number(el.value); S.prices[el.dataset.price] = v > 0 ? v : null; save(); return render(); }
+    if (el.dataset.feemode) { S.feeDefaults[el.dataset.feemode].mode = el.value; save(); return render(); }
+    if (el.dataset.feeval) { S.feeDefaults[el.dataset.feeval].value = Math.max(0, Number(el.value) || 0); save(); return render(); }
+    if (el.id === 'pf_customFee' || el.id === 'pf_targetA') return syncPairForm();
+    if (el.id === 'calcDate') { calc.date = el.value; return; }
+    if (el.id === 'calcReason') { calc.reason = el.value; return; }
+    if (el.dataset.leg) {
+      const leg = calc[el.dataset.leg];
+      if (el.dataset.f === 'feeMode') leg.fee.mode = el.value;
+      else if (el.dataset.f === 'feeValue') leg.fee.value = Math.max(0, Number(el.value) || 0);
+      else leg[el.dataset.f] = Math.max(0, Number(el.value) || 0);
+      renderCalc();
+    }
+  });
+  document.addEventListener('input', (e) => { if (e.target.id === 'pf_targetA') syncPairForm(); });
+
+  render();
+})();
+</script>
+</body>
+</html>

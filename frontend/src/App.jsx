@@ -1,8 +1,8 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { 
-  Layout, Menu, Button, Card, Statistic, Table, Modal, 
+  Layout, Menu, Button, Card, Table, Modal, 
   Form, Input, InputNumber, Select, DatePicker, Row, Col, Space, 
-  Spin, Tag, Typography, Popconfirm, message, Alert, Switch, ConfigProvider, theme, Checkbox, Progress
+  Spin, Tag, Typography, Popconfirm, message, Alert, Switch, ConfigProvider, theme, Progress
 } from 'antd';
 import { 
   DashboardOutlined, 
@@ -23,22 +23,30 @@ import {
   SwapOutlined,
   MenuFoldOutlined,
   MenuUnfoldOutlined,
-  InfoCircleOutlined,
   EyeOutlined,
   EyeInvisibleOutlined,
   LockOutlined,
   EditOutlined,
   LogoutOutlined,
-  BankOutlined,
   PieChartOutlined,
-  DollarOutlined,
-  SlidersOutlined
+  DollarOutlined
 } from '@ant-design/icons';
 import { 
   AreaChart, Area, PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend,
   BarChart, Bar, XAxis, YAxis, CartesianGrid, ReferenceLine
 } from 'recharts';
 import dayjs from 'dayjs';
+import { parseCSV } from './lib/csv.js';
+import { ASSET_TYPE_COLORS, CURRENCY_SYMBOLS } from './lib/constants.js';
+import {
+  computeTradeStats,
+  computeTradingAnalytics,
+  computePositions,
+  computeKpis,
+  computePortfolioSizing,
+  computeCumulativeRealized,
+  computePnlByDimension
+} from './lib/portfolioEngine.js';
 
 const { Header, Content, Sider } = Layout;
 const { Title, Text } = Typography;
@@ -47,52 +55,6 @@ const { Option } = Select;
 // Force Cloud Mode (Google Sheets Serverless DB) to always be true
 const isCloudMode = true;
 
-const getApiUrl = (endpoint) => {
-  const scriptUrl = localStorage.getItem('google_apps_script_url');
-  return { type: 'cloud', url: scriptUrl || '' };
-};
-
-// Robust RFC 4180-compliant CSV Parser that handles nested quotes, commas, and newlines
-const parseCSV = (csvText) => {
-  const lines = [];
-  let currentLine = [];
-  let currentVal = '';
-  let inQuotes = false;
-  
-  for (let i = 0; i < csvText.length; i++) {
-    const char = csvText[i];
-    const nextChar = csvText[i + 1];
-    
-    if (char === '"') {
-      if (inQuotes && nextChar === '"') {
-        currentVal += '"';
-        i++; // skip next escaped quote
-      } else {
-        inQuotes = !inQuotes;
-      }
-    } else if (char === ',' && !inQuotes) {
-      currentLine.push(currentVal.trim());
-      currentVal = '';
-    } else if ((char === '\r' || char === '\n') && !inQuotes) {
-      if (char === '\r' && nextChar === '\n') {
-        i++;
-      }
-      currentLine.push(currentVal.trim());
-      if (currentLine.length > 1 || currentLine[0] !== '') {
-        lines.push(currentLine);
-      }
-      currentLine = [];
-      currentVal = '';
-    } else {
-      currentVal += char;
-    }
-  }
-  if (currentVal || currentLine.length > 0) {
-    currentLine.push(currentVal.trim());
-    lines.push(currentLine);
-  }
-  return lines;
-};
 
 // Helper to communicate with Google Apps Script without triggering CORS preflight (OPTIONS) requests
 const callGoogleAppsScript = async (url, payload = null) => {
@@ -119,20 +81,6 @@ const callGoogleAppsScript = async (url, payload = null) => {
     }
     return await response.json();
   }
-};
-
-// Asset type categories for mapping and styling
-const ASSET_TYPE_COLORS = {
-  'Thai Stock': '#00f2fe',
-  'Global Stock': '#3b82f6',
-  'Crypto': '#f59e0b'
-};
-
-// Currency configurations for symbols
-const CURRENCY_SYMBOLS = {
-  'THB': '฿',
-  'USD': '$',
-  'EUR': '€'
 };
 
 function App() {
@@ -414,7 +362,7 @@ function App() {
       const assetName = assetNameIdx !== -1 && row[assetNameIdx] ? row[assetNameIdx].toString().trim() : "";
       if (!assetName) continue;
       
-      let dateVal = "";
+      let dateVal;
       if (dateIdx !== -1 && row[dateIdx]) {
         const d = row[dateIdx].toString().trim();
         dateVal = dayjs(d).isValid() ? dayjs(d).format("YYYY-MM-DD") : d;
@@ -597,130 +545,12 @@ function App() {
 
   // Running stats for all filtered trades chronologically
   const tradesWithRunningStats = useMemo(() => {
-    const sorted = [...filteredTrades].sort((a, b) => {
-      const dateA = a.date || '';
-      const dateB = b.date || '';
-      if (dateA !== dateB) return dateA.localeCompare(dateB);
-      const idA = parseInt(a.id) || 0;
-      const idB = parseInt(b.id) || 0;
-      return idA - idB;
-    });
-
-    const running = {}; // key: assetName -> { qty: 0, totalCost: 0 }
-    const statsMap = {}; // key: trade.id -> { avgCostBasis, realizedPnL, unrealizedPnL, feeAmount }
-
-    sorted.forEach(trade => {
-      const name = trade.assetName;
-      if (!running[name]) {
-        running[name] = { qty: 0, totalCost: 0 };
-      }
-      const holding = running[name];
-      const qty = Number(trade.quantity) || 0;
-      const price = Number(trade.priceUnit) || 0;
-      const isBuy = trade.action.toLowerCase() === 'buy';
-
-      const feeAmount = trade.feeAmount !== undefined ? Number(trade.feeAmount) : 0.0;
-      const avgCostBefore = holding.qty > 0 ? (holding.totalCost / holding.qty) : 0;
-
-      if (isBuy) {
-        const costBasis = qty * price + feeAmount;
-        holding.qty += qty;
-        holding.totalCost += costBasis;
-        const avgCostAfter = holding.qty > 0 ? (holding.totalCost / holding.qty) : 0;
-
-        const lp = livePrices[name] !== undefined && livePrices[name] !== null ? livePrices[name] : price;
-        const unrealizedPnL = qty * lp - costBasis;
-
-        statsMap[trade.id] = {
-          avgCostBasis: avgCostAfter,
-          realizedPnL: 0,
-          unrealizedPnL: unrealizedPnL,
-          feeAmount: feeAmount
-        };
-      } else {
-        const revenue = qty * price - feeAmount;
-        const costOfSharesSold = qty * avgCostBefore;
-        const realizedPnL = revenue - costOfSharesSold;
-
-        holding.qty = Math.max(0, holding.qty - qty);
-        holding.totalCost = holding.qty * avgCostBefore;
-        if (holding.qty === 0) {
-          holding.totalCost = 0;
-        }
-
-        statsMap[trade.id] = {
-          avgCostBasis: avgCostBefore,
-          realizedPnL: realizedPnL,
-          unrealizedPnL: 0,
-          feeAmount: feeAmount
-        };
-      }
-    });
-
-    return statsMap;
+    return computeTradeStats(filteredTrades, livePrices);
   }, [filteredTrades, livePrices]);
 
   // Advanced Trading Analytics
   const tradingAnalytics = useMemo(() => {
-    const totalTrades = filteredTrades.length;
-    const buysCount = filteredTrades.filter(t => t.action.toLowerCase() === 'buy').length;
-    const sellsCount = filteredTrades.filter(t => t.action.toLowerCase() === 'sell').length;
-
-    let winCount = 0;
-    let lossCount = 0;
-    let grossProfit = 0;
-    let grossLoss = 0;
-    let maxWinVal = 0;
-    let maxLossVal = 0;
-
-    filteredTrades.forEach(trade => {
-      const stats = tradesWithRunningStats[trade.id];
-      if (!stats) return;
-
-      const rateToTHB = liveRates[trade.currency] || 1.0;
-      const displayRateToTHB = liveRates[displayCurrency] || 1.0;
-
-      if (trade.action.toLowerCase() === 'sell') {
-        const realizedPnLConverted = (stats.realizedPnL * rateToTHB) / displayRateToTHB;
-
-        if (realizedPnLConverted > 0.01) {
-          winCount++;
-          grossProfit += realizedPnLConverted;
-          if (realizedPnLConverted > maxWinVal) {
-            maxWinVal = realizedPnLConverted;
-          }
-        } else if (realizedPnLConverted < -0.01) {
-          lossCount++;
-          grossLoss += Math.abs(realizedPnLConverted);
-          if (Math.abs(realizedPnLConverted) > maxLossVal) {
-            maxLossVal = Math.abs(realizedPnLConverted);
-          }
-        }
-      }
-    });
-
-    const totalClosedTrades = winCount + lossCount;
-    const winRate = totalClosedTrades > 0 ? (winCount / totalClosedTrades) * 100 : 0;
-    const profitFactor = grossLoss > 0 ? (grossProfit / grossLoss) : (grossProfit > 0 ? Infinity : 1.0);
-    const avgWin = winCount > 0 ? (grossProfit / winCount) : 0;
-    const avgLoss = lossCount > 0 ? (grossLoss / lossCount) : 0;
-    const riskRewardRatio = avgLoss > 0 ? (avgWin / avgLoss) : 0;
-
-    return {
-      totalTrades,
-      buysCount,
-      sellsCount,
-      winCount,
-      lossCount,
-      totalClosedTrades,
-      winRate,
-      profitFactor,
-      avgWin,
-      avgLoss,
-      riskRewardRatio,
-      maxWinVal,
-      maxLossVal
-    };
+    return computeTradingAnalytics(filteredTrades, tradesWithRunningStats, liveRates, displayCurrency);
   }, [filteredTrades, tradesWithRunningStats, liveRates, displayCurrency]);
 
   // Search and filtered trades specifically for the Journal Table display
@@ -753,116 +583,7 @@ function App() {
 
   // Holding calculations for all unique assets, converted to the display currency
   const positions = useMemo(() => {
-    // Sort all trades in filteredTrades chronologically
-    const sorted = [...filteredTrades].sort((a, b) => {
-      const dateA = a.date || '';
-      const dateB = b.date || '';
-      if (dateA !== dateB) return dateA.localeCompare(dateB);
-      const idA = parseInt(a.id) || 0;
-      const idB = parseInt(b.id) || 0;
-      return idA - idB;
-    });
-
-    const runningHoldings = {}; // key: assetName -> running stats
-
-    sorted.forEach(trade => {
-      const name = trade.assetName;
-      if (!name) return;
-
-      if (!runningHoldings[name]) {
-        runningHoldings[name] = {
-          assetName: name,
-          assetType: trade.assetType || 'Thai Stock',
-          currency: trade.currency || 'THB',
-          qty: 0,
-          totalCost: 0,
-          totalRealizedPnL: 0,
-          totalBuyQty: 0,
-          totalBuyCost: 0,
-          totalSellQty: 0,
-          totalSellRevenue: 0
-        };
-      }
-
-      const holding = runningHoldings[name];
-      const qty = Number(trade.quantity) || 0;
-      const price = Number(trade.priceUnit) || 0;
-      const isBuy = trade.action.toLowerCase() === 'buy';
-
-      const feeAmount = trade.feeAmount !== undefined ? Number(trade.feeAmount) : 0.0;
-
-      if (isBuy) {
-        const costBasis = qty * price + feeAmount;
-        holding.totalBuyQty += qty;
-        holding.totalBuyCost += costBasis;
-        holding.qty += qty;
-        holding.totalCost += costBasis;
-      } else {
-        const revenue = qty * price - feeAmount;
-        holding.totalSellQty += qty;
-        holding.totalSellRevenue += revenue;
-
-        const avgCostBefore = holding.qty > 0 ? (holding.totalCost / holding.qty) : 0;
-        const costOfSharesSold = qty * avgCostBefore;
-        const realizedPnL = revenue - costOfSharesSold;
-
-        holding.totalRealizedPnL += realizedPnL;
-        holding.qty = Math.max(0, holding.qty - qty);
-        holding.totalCost = holding.qty * avgCostBefore;
-        if (holding.qty === 0) {
-          holding.totalCost = 0;
-        }
-      }
-    });
-
-    // Map running holdings to final positions array
-    return Object.values(runningHoldings).map(holding => {
-      const qtyHeld = holding.qty;
-      const wac = qtyHeld > 0 ? (holding.totalCost / qtyHeld) : 0;
-      const totalCost = holding.totalCost;
-
-      // Single source of truth live price from Yahoo Finance
-      const livePrice = livePrices[holding.assetName] !== undefined && livePrices[holding.assetName] !== null
-        ? livePrices[holding.assetName]
-        : wac; // Fallback to WAC
-
-      const liveValue = qtyHeld * livePrice;
-      const unrealizedPnL = liveValue - totalCost;
-      const realizedPnL = holding.totalRealizedPnL;
-
-      // Exchange rate conversion logic:
-      const rateToTHB = liveRates[holding.currency] || 1.0;
-      const displayRateToTHB = liveRates[displayCurrency] || 1.0;
-
-      const totalCostConverted = (totalCost * rateToTHB) / displayRateToTHB;
-      const liveValueConverted = (liveValue * rateToTHB) / displayRateToTHB;
-      const unrealizedPnLConverted = (unrealizedPnL * rateToTHB) / displayRateToTHB;
-      const realizedPnLConverted = (realizedPnL * rateToTHB) / displayRateToTHB;
-      const totalPnLConverted = unrealizedPnLConverted + realizedPnLConverted;
-      const wacConverted = (wac * rateToTHB) / displayRateToTHB;
-      const livePriceConverted = (livePrice * rateToTHB) / displayRateToTHB;
-
-      return {
-        ...holding,
-        qtyHeld,
-        wac, // local currency
-        totalCost, // local currency
-        livePrice, // local currency
-        liveValue, // local currency
-        unrealizedPnL, // local currency
-        realizedPnL, // local currency
-        
-        // Converted Values for UI Display
-        wacConverted,
-        livePriceConverted,
-        totalCostConverted,
-        liveValueConverted,
-        unrealizedPnLConverted,
-        realizedPnLConverted,
-        totalPnLConverted,
-        unrealizedPnLPct: totalCost > 0 ? (unrealizedPnL / totalCost) * 100 : 0
-      };
-    });
+    return computePositions(filteredTrades, livePrices, liveRates, displayCurrency);
   }, [filteredTrades, livePrices, liveRates, displayCurrency]);
 
   // Render positions applying the search and filter query
@@ -882,73 +603,18 @@ function App() {
   }, [positions, positionsTypeFilter, positionsSearch]);
 
   // Aggregate portfolios KPIs (summing up from active holdings and realized gains)
-  const kpis = useMemo(() => {
-    let totalInvestedConverted = 0;
-    let currentMarketValueConverted = 0;
-    let totalUnrealizedPnLConverted = 0;
-    let totalRealizedPnLConverted = 0;
-
-    positions.forEach(pos => {
-      if (pos.qtyHeld > 0) {
-        totalInvestedConverted += pos.totalCostConverted;
-        currentMarketValueConverted += pos.liveValueConverted;
-        totalUnrealizedPnLConverted += pos.unrealizedPnLConverted;
-      }
-      totalRealizedPnLConverted += pos.realizedPnLConverted;
-    });
-
-    const totalPnLConverted = totalUnrealizedPnLConverted + totalRealizedPnLConverted;
-    const totalPnLPct = totalInvestedConverted > 0 ? (totalPnLConverted / totalInvestedConverted) * 100 : 0;
-
-    return {
-      totalInvestedConverted,
-      currentMarketValueConverted,
-      totalUnrealizedPnLConverted,
-      totalRealizedPnLConverted,
-      totalPnLConverted,
-      totalPnLPct
-    };
-  }, [positions]);
+  const kpis = useMemo(() => computeKpis(positions), [positions]);
 
   // Portfolio capital configuration and target sizing calculations
   const portfolioSizing = useMemo(() => {
-    let initialCapital = 0;
-    let targetStocks = 0;
-    
     const configs = JSON.parse(localStorage.getItem('alphatrader_portfolio_configs') || '{}');
-    
-    if (activePortfolio === 'All Portfolios') {
-      portfolios.forEach(p => {
-        const c = configs[p] || { initialCapital: 2000000, targetStocks: 50 };
-        initialCapital += c.initialCapital;
-        targetStocks += c.targetStocks;
-      });
-      if (portfolios.length === 0) {
-        initialCapital = 2000000;
-        targetStocks = 50;
-      }
-    } else {
-      const c = configs[activePortfolio] || { initialCapital: 2000000, targetStocks: 50 };
-      initialCapital = c.initialCapital;
-      targetStocks = c.targetStocks;
-    }
-    
-    const totalRealizedPnL = kpis.totalRealizedPnLConverted;
-    const totalInvested = kpis.totalInvestedConverted;
-    
-    const cashOnHand = initialCapital - totalInvested + totalRealizedPnL;
-    const positionSizeBalance = targetStocks > 0 ? (initialCapital + totalRealizedPnL) / targetStocks : 0;
-    const positionSizeCash = targetStocks > 0 ? (cashOnHand + totalRealizedPnL) / targetStocks : 0;
-    const activeHoldingsCount = positions.filter(pos => pos.qtyHeld > 0).length;
-    
-    return {
-      initialCapital,
-      targetStocks,
-      cashOnHand,
-      positionSizeBalance,
-      positionSizeCash,
-      activeHoldingsCount
-    };
+    return computePortfolioSizing({
+      portfolios,
+      activePortfolio,
+      configs,
+      kpis,
+      positions
+    });
   }, [portfolios, activePortfolio, kpis, positions]);
 
   // ----------------------------------------------------
@@ -957,51 +623,7 @@ function App() {
 
   // 1. Cumulative Realized P&L Line Chart over Time
   const cumulativePnLData = useMemo(() => {
-    const sortedTrades = [...filteredTrades].sort((a, b) => dayjs(a.date).unix() - dayjs(b.date).unix());
-    
-    const assetState = {}; // tracker for WAC and qty per asset
-    let runningRealizedPnL = 0;
-    const datePnLMap = {};
-
-    sortedTrades.forEach(trade => {
-      const name = trade.assetName;
-      const qty = Number(trade.quantity) || 0;
-      const price = Number(trade.priceUnit) || 0;
-      const action = trade.action.toLowerCase();
-      const date = trade.date;
-
-      if (!assetState[name]) {
-        assetState[name] = { qty: 0, totalCost: 0 };
-      }
-      const state = assetState[name];
-
-      // Conversion rates
-      const rateToTHB = liveRates[trade.currency] || 1.0;
-      const displayRateToTHB = liveRates[displayCurrency] || 1.0;
-
-      if (action === 'buy') {
-        state.qty += qty;
-        state.totalCost += qty * price;
-      } else if (action === 'sell') {
-        const wac = state.qty > 0 ? (state.totalCost / state.qty) : 0;
-        const realized = (price - wac) * qty;
-        const realizedConverted = (realized * rateToTHB) / displayRateToTHB;
-        runningRealizedPnL += realizedConverted;
-
-        // update quantities
-        state.qty = Math.max(0, state.qty - qty);
-        state.totalCost = Math.max(0, state.totalCost - (qty * wac));
-      }
-
-      datePnLMap[date] = Number(runningRealizedPnL.toFixed(2));
-    });
-
-    const sortedDates = Object.keys(datePnLMap).sort((a, b) => dayjs(a).unix() - dayjs(b).unix());
-    
-    return sortedDates.map(date => ({
-      date: dayjs(date).format('MMM DD, YYYY'),
-      PnL: datePnLMap[date]
-    }));
+    return computeCumulativeRealized(filteredTrades, liveRates, displayCurrency);
   }, [filteredTrades, liveRates, displayCurrency]);
 
   // 2. Asset Allocation Data (By Category or Asset Name)
@@ -1029,43 +651,7 @@ function App() {
 
   // 3. P&L by Dimension (Strategy, Category, or Asset Name)
   const pnlDistributionData = useMemo(() => {
-    const groupings = {};
-    
-    filteredTrades.forEach(trade => {
-      let key = 'Unspecified';
-      if (pnlDimension === 'strategy') {
-        key = trade.why || 'Unspecified';
-      } else if (pnlDimension === 'type') {
-        key = trade.assetType || 'Thai Stock';
-      } else if (pnlDimension === 'name') {
-        key = trade.assetName;
-      }
-      
-      const qty = Number(trade.quantity) || 0;
-      const buyPrice = Number(trade.priceUnit) || 0;
-      const asset = trade.assetName;
-      
-      const livePrice = livePrices[asset] !== undefined && livePrices[asset] !== null
-        ? livePrices[asset]
-        : buyPrice;
-      
-      const rateToTHB = liveRates[trade.currency] || 1.0;
-      const displayRateToTHB = liveRates[displayCurrency] || 1.0;
-      
-      let pnlConverted = 0;
-      if (trade.action.toLowerCase() === 'buy') {
-        pnlConverted = ((livePrice - buyPrice) * qty * rateToTHB) / displayRateToTHB;
-      } else if (trade.action.toLowerCase() === 'sell') {
-        pnlConverted = ((buyPrice - livePrice) * qty * rateToTHB) / displayRateToTHB;
-      }
-      
-      groupings[key] = (groupings[key] || 0) + pnlConverted;
-    });
-
-    return Object.keys(groupings).map(key => ({
-      name: key,
-      PnL: Number(groupings[key].toFixed(2))
-    }));
+    return computePnlByDimension(filteredTrades, livePrices, liveRates, displayCurrency, pnlDimension);
   }, [filteredTrades, livePrices, liveRates, displayCurrency, pnlDimension]);
 
   // 4. Realized P&L Breakdown Data by Asset Name

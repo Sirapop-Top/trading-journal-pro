@@ -30,3 +30,4 @@ pip-delete-this-directory.txt
 pip-wheel-metadata/
 .mypy_cache/
 .pytest_cache/
+*.bak
