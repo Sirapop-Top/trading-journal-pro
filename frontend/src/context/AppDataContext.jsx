@@ -1,5 +1,6 @@
-import { createContext, useContext, useState, useEffect } from 'react';
+import { createContext, useContext, useState, useEffect, useMemo, useCallback } from 'react';
 import { Form } from 'antd';
+import dayjs from 'dayjs';
 import { useJournalData } from '../hooks/useJournalData.js';
 import { usePortfolioDerived } from '../hooks/usePortfolioDerived.js';
 import { useResponsive } from '../hooks/useResponsive.js';
@@ -9,6 +10,13 @@ import { useTradeActions } from '../hooks/useTradeActions.js';
 import { useRebalanceActions } from '../hooks/useRebalanceActions.js';
 import { useCashActions } from '../hooks/useCashActions.js';
 import { computeCashLedgerStatement, computeCashKpis, calculateDefaultWht } from '../lib/cashEngine.js';
+import {
+  computeMonthlyHeatmap,
+  computeEquityCurveAndDrawdown,
+  normalizeBenchmark,
+  computeStrategyDetailedStats
+} from '../lib/analyticsEngine.js';
+import { fetchHistoryApi } from '../api/sheetsClient.js';
 
 const AppDataContext = createContext(null);
 
@@ -16,6 +24,42 @@ export const AppDataProvider = ({ children }) => {
   // Navigation & Sider
   const [activeTab, setActiveTab] = useState('dashboard');
   const [siderCollapsed, setSiderCollapsed] = useState(false);
+
+  // Global Date Range (Step 6 Analytics & UX)
+  // preset: 'All' | 'YTD' | '1Y' | '3Y' | 'Custom'
+  const [dateRangePreset, setDateRangePreset] = useState('All');
+  const [customDateRange, setCustomDateRange] = useState(null);
+
+  const dateRange = useMemo(() => {
+    const today = dayjs().format('YYYY-MM-DD');
+    if (dateRangePreset === 'YTD') {
+      return [dayjs().startOf('year').format('YYYY-MM-DD'), today];
+    }
+    if (dateRangePreset === '1Y') {
+      return [dayjs().subtract(1, 'year').format('YYYY-MM-DD'), today];
+    }
+    if (dateRangePreset === '3Y') {
+      return [dayjs().subtract(3, 'year').format('YYYY-MM-DD'), today];
+    }
+    if (dateRangePreset === 'Custom') {
+      return customDateRange;
+    }
+    return null;
+  }, [dateRangePreset, customDateRange]);
+
+  // Online / Offline Status (Step 6.9 PWA Resilience)
+  const [isOnline, setIsOnline] = useState(typeof navigator !== 'undefined' ? navigator.onLine : true);
+
+  useEffect(() => {
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
 
   // Filters & Dimensions
   const [journalActionFilter, setJournalActionFilter] = useState('All');
@@ -47,6 +91,7 @@ export const AppDataProvider = ({ children }) => {
     liveRates: journal.liveRates,
     displayCurrency: journal.displayCurrency,
     cashEntries: journal.cashLedger,
+    dateRange,
     journalActionFilter,
     journalAssetTypeFilter,
     journalSearch,
@@ -144,12 +189,101 @@ export const AppDataProvider = ({ children }) => {
     displayCurrency: journal.displayCurrency
   });
 
+  // 6.3 Historical Prices & Benchmark State
+  const [selectedBenchmark, setSelectedBenchmark] = useState('^SET.BK');
+  const [historicalPrices, setHistoricalPrices] = useState({});
+  const [isLoadingHistory, setIsLoadingHistory] = useState(false);
+
+  const fetchHistoricalData = useCallback(async (symbols = [], range = '1y') => {
+    if (!symbols.length) return;
+    setIsLoadingHistory(true);
+    try {
+      const scriptUrl = localStorage.getItem('google_apps_script_url');
+      if (scriptUrl) {
+        const res = await fetchHistoryApi(scriptUrl, symbols, range);
+        if (res && res.success && res.history) {
+          setHistoricalPrices(prev => ({ ...prev, ...res.history }));
+        }
+      }
+    } catch (e) {
+      console.error('fetchHistoricalData error:', e);
+    } finally {
+      setIsLoadingHistory(false);
+    }
+  }, []);
+
+  // 6.2 Monthly P&L Heatmap
+  const monthlyHeatmap = useMemo(() => {
+    return computeMonthlyHeatmap(
+      derived.filteredTrades,
+      journal.cashLedger,
+      journal.liveRates,
+      journal.displayCurrency
+    );
+  }, [derived.filteredTrades, journal.cashLedger, journal.liveRates, journal.displayCurrency]);
+
+  // 6.4 Equity Curve and Drawdown
+  const equityCurveData = useMemo(() => {
+    return computeEquityCurveAndDrawdown(
+      derived.filteredTrades,
+      historicalPrices,
+      journal.cashLedger,
+      journal.liveRates,
+      journal.displayCurrency
+    );
+  }, [derived.filteredTrades, historicalPrices, journal.cashLedger, journal.liveRates, journal.displayCurrency]);
+
+  // 6.5 Benchmark Normalization
+  const normalizedBenchmark = useMemo(() => {
+    const targetDates = equityCurveData.series.map(s => s.date);
+    const benchmarkSeries = historicalPrices[selectedBenchmark] || [];
+    return normalizeBenchmark(benchmarkSeries, targetDates, 100);
+  }, [equityCurveData.series, historicalPrices, selectedBenchmark]);
+
+  // 6.6 Strategy Detailed Stats
+  const strategyDetailedStats = useMemo(() => {
+    return computeStrategyDetailedStats(
+      derived.filteredTrades,
+      derived.tradesWithRunningStats,
+      journal.liveRates,
+      journal.displayCurrency
+    );
+  }, [derived.filteredTrades, derived.tradesWithRunningStats, journal.liveRates, journal.displayCurrency]);
+
+  // 6.8 CSV Import Modal
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+
   const value = {
     // Navigation
     activeTab,
     setActiveTab,
     siderCollapsed,
     setSiderCollapsed,
+
+    // Global Date Range (Step 6.1)
+    dateRange,
+    dateRangePreset,
+    setDateRangePreset,
+    customDateRange,
+    setCustomDateRange,
+
+    // PWA & Connectivity (Step 6.9)
+    isOnline,
+
+    // Analytics (Step 6.2 - 6.6)
+    monthlyHeatmap,
+    equityCurveData,
+    normalizedBenchmark,
+    strategyDetailedStats,
+    selectedBenchmark,
+    setSelectedBenchmark,
+    historicalPrices,
+    isLoadingHistory,
+    fetchHistoricalData,
+
+    // CSV Import Modal (Step 6.8)
+    isImportModalOpen,
+    setIsImportModalOpen,
 
     // Filters & View Dimensions
     journalActionFilter,

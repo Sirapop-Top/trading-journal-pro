@@ -196,3 +196,17 @@ export const deleteCashEntryApi = async (scriptUrl, entryId) => {
   return await postAction(scriptUrl, 'deleteCashEntry', { entryId });
 };
 
+export const addTradesBatchApi = async (scriptUrl, trades) => {
+  return await postAction(scriptUrl, 'addTradesBatch', { trades });
+};
+
+export const fetchHistoryApi = async (scriptUrl, symbols, range = '1y') => {
+  try {
+    return await postAction(scriptUrl, 'getHistory', { symbols, range });
+  } catch (err) {
+    console.error('fetchHistoryApi error:', err);
+    return { success: false, history: {} };
+  }
+};
+
+

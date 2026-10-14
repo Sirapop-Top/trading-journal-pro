@@ -2,6 +2,7 @@ import { Card, Table, Tag, Typography, Input, Select, Space, Button, Popconfirm,
 import {
   PlusOutlined,
   DownloadOutlined,
+  UploadOutlined,
   SearchOutlined,
   EditOutlined,
   SwapOutlined,
@@ -21,6 +22,7 @@ export const JournalTab = () => {
     setFormAction,
     tradeForm,
     setIsTradeModalOpen,
+    setIsImportModalOpen,
     exportToCSV,
     filteredTrades,
     journalSearch,
@@ -292,10 +294,17 @@ export const JournalTab = () => {
               Log Trade
             </Button>
             <Button 
+              icon={<UploadOutlined />} 
+              onClick={() => setIsImportModalOpen(true)}
+              size="small"
+              title="Import CSV"
+            />
+            <Button 
               icon={<DownloadOutlined />} 
               onClick={exportToCSV}
               disabled={filteredTrades.length === 0}
               size="small"
+              title="Export CSV"
             />
           </Space>
         </div>
@@ -355,6 +364,13 @@ export const JournalTab = () => {
             style={{ backgroundColor: 'var(--success-color)', border: 'none', fontWeight: 'bold', color: '#06080f' }}
           >
             Log Trade
+          </Button>
+          <Button 
+            icon={<UploadOutlined />} 
+            onClick={() => setIsImportModalOpen(true)}
+            style={{ fontWeight: 'bold' }}
+          >
+            Import CSV
           </Button>
           <Button 
             icon={<DownloadOutlined />} 

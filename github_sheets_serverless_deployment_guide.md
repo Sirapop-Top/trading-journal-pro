@@ -82,13 +82,18 @@ Paste this complete script inside your Google Apps Script editor (Step 1.6):
 // Schema Version: 2.0 (Rebalance & Multi-Asset Support)
 // ==========================================
 
-var SCHEMA_VERSION = "2.1";
+var SCHEMA_VERSION = "2.2";
 
 function doGet(e) {
   var action = e ? e.parameter.action : "";
   
   if (action === "getData") {
     return ContentService.createTextOutput(JSON.stringify(getDashboardData()))
+      .setMimeType(ContentService.MimeType.JSON);
+  } else if (action === "getHistory") {
+    var syms = e && e.parameter && e.parameter.symbols ? e.parameter.symbols.split(",") : [];
+    var rng = (e && e.parameter && e.parameter.range) ? e.parameter.range : "1y";
+    return ContentService.createTextOutput(JSON.stringify(getHistory(syms, rng)))
       .setMimeType(ContentService.MimeType.JSON);
   }
   
@@ -103,6 +108,12 @@ function doPost(e) {
   try {
     if (action === "addTrade") {
       return ContentService.createTextOutput(JSON.stringify(addTrade(contents.trade)))
+        .setMimeType(ContentService.MimeType.JSON);
+    } else if (action === "addTradesBatch") {
+      return ContentService.createTextOutput(JSON.stringify(addTradesBatch(contents.trades)))
+        .setMimeType(ContentService.MimeType.JSON);
+    } else if (action === "getHistory") {
+      return ContentService.createTextOutput(JSON.stringify(getHistory(contents.symbols, contents.range)))
         .setMimeType(ContentService.MimeType.JSON);
     } else if (action === "deleteTrade") {
       return ContentService.createTextOutput(JSON.stringify(deleteTrade(contents.tradeId)))
@@ -2098,5 +2109,115 @@ function deleteCashEntry(entryId) {
   } finally {
     lock.releaseLock();
   }
+}
+
+// Atomic Batch Write for adding multiple trades (up to 200 per batch)
+function addTradesBatch(trades) {
+  if (!trades || !trades.length) return { success: false, error: "No trades provided." };
+  if (trades.length > 200) return { success: false, error: "Batch size exceeds maximum limit of 200 trades." };
+  
+  var lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(15000);
+  } catch (e) {
+    return { success: false, error: "System is busy. Please try again in a few seconds." };
+  }
+  
+  try {
+    ensureTableStructure();
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheet = ss.getSheetByName("Journal");
+    var lastRow = sheet.getLastRow();
+    var lastCol = sheet.getLastColumn();
+    var headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+    
+    var batchRows = [];
+    for (var i = 0; i < trades.length; i++) {
+      var rowIdx = lastRow + 1 + i;
+      var rowValues = buildJournalRow(headers, rowIdx, trades[i]);
+      batchRows.push(rowValues);
+    }
+    
+    if (batchRows.length > 0) {
+      sheet.getRange(lastRow + 1, 1, batchRows.length, headers.length).setValues(batchRows);
+    }
+    return { success: true, count: batchRows.length };
+  } catch (err) {
+    return { success: false, error: err.toString() };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// Fetch historical daily prices from Yahoo Finance with CacheService (6-hour cache)
+function getHistory(symbols, range) {
+  if (!symbols || !symbols.length) return { success: true, history: {} };
+  var targetRange = range || "1y";
+  var cache = CacheService.getScriptCache();
+  var result = {};
+  var uncachedSymbols = [];
+  
+  for (var i = 0; i < symbols.length; i++) {
+    var sym = symbols[i];
+    var cacheKey = "HIST_" + sym + "_" + targetRange;
+    var cached = cache.get(cacheKey);
+    if (cached) {
+      try {
+        result[sym] = JSON.parse(cached);
+      } catch (e) {
+        uncachedSymbols.push(sym);
+      }
+    } else {
+      uncachedSymbols.push(sym);
+    }
+  }
+  
+  if (uncachedSymbols.length === 0) {
+    return { success: true, history: result };
+  }
+  
+  var requests = uncachedSymbols.map(function(sym) {
+    var resolvedSym = sym;
+    if (sym.indexOf(":S1X") !== -1) {
+      resolvedSym = sym.replace(":S1X", "");
+    }
+    return {
+      url: "https://query1.finance.yahoo.com/v8/finance/chart/" + encodeURIComponent(resolvedSym) + "?range=" + targetRange + "&interval=1d",
+      muteHttpExceptions: true
+    };
+  });
+  
+  try {
+    var responses = UrlFetchApp.fetchAll(requests);
+    for (var j = 0; j < responses.length; j++) {
+      var symOrig = uncachedSymbols[j];
+      var resp = responses[j];
+      if (resp && resp.getResponseCode() === 200) {
+        try {
+          var data = JSON.parse(resp.getContentText());
+          var chartRes = data.chart && data.chart.result && data.chart.result[0];
+          if (chartRes && chartRes.timestamp && chartRes.indicators && chartRes.indicators.quote && chartRes.indicators.quote[0].close) {
+            var timestamps = chartRes.timestamp;
+            var closes = chartRes.indicators.quote[0].close;
+            var series = [];
+            for (var k = 0; k < timestamps.length; k++) {
+              if (closes[k] !== null && closes[k] !== undefined && !isNaN(closes[k])) {
+                var dStr = new Date(timestamps[k] * 1000).toISOString().split('T')[0];
+                series.push({ date: dStr, close: Math.round(closes[k] * 10000) / 10000 });
+              }
+            }
+            result[symOrig] = series;
+            
+            var strVal = JSON.stringify(series);
+            if (strVal.length < 100000) {
+              cache.put("HIST_" + symOrig + "_" + targetRange, strVal, 21600);
+            }
+          }
+        } catch (e) {}
+      }
+    }
+  } catch (err) {}
+  
+  return { success: true, history: result };
 }
 `

@@ -1,8 +1,10 @@
 import { useState, useMemo } from 'react';
 import { Table, Tag, Input, Select, Space, Button, Popconfirm, Typography } from 'antd';
-import { SearchOutlined, EditOutlined, DeleteOutlined, InfoCircleOutlined } from '@ant-design/icons';
+import { SearchOutlined, EditOutlined, DeleteOutlined, InfoCircleOutlined, DownloadOutlined } from '@ant-design/icons';
+import dayjs from 'dayjs';
 import { useAppData } from '../../context/AppDataContext.jsx';
 import { formatCurrency, CASH_KIND_COLORS, CURRENCY_SYMBOLS } from '../../lib/constants.js';
+import { exportToCsv } from '../../lib/csvHelper.js';
 
 const { Option } = Select;
 const { Text } = Typography;
@@ -183,6 +185,26 @@ export const CashStatementTable = () => {
     }
   ];
 
+  const handleExportCsv = () => {
+    const filename = `Cash_Statement_${(activePortfolio || 'Portfolio').replace(/\s+/g, '_')}_${displayCurrency}_${dayjs().format('YYYYMMDD')}.csv`;
+    const headers = [
+      'Date', 'Portfolio', 'Type', 'Description', 'Currency',
+      'Net (Local)', `Flow (${displayCurrency})`, `Balance After (${displayCurrency})`, 'Is Trade'
+    ];
+    const rows = filteredStatement.map(r => [
+      r.date || '',
+      r.portfolio || '',
+      r.kind || '',
+      r.description || '',
+      r.currency || '',
+      r.net !== undefined ? r.net : '',
+      r.flowConverted !== undefined ? Number(r.flowConverted).toFixed(2) : '',
+      r.balanceAfter !== undefined ? Number(r.balanceAfter).toFixed(2) : '',
+      r.isTrade ? 'Yes' : 'No'
+    ]);
+    exportToCsv(filename, headers, rows);
+  };
+
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
@@ -210,6 +232,13 @@ export const CashStatementTable = () => {
             <Option value="Fee">Fee</Option>
             <Option value="Tax">Tax</Option>
           </Select>
+          <Button
+            icon={<DownloadOutlined />}
+            onClick={handleExportCsv}
+            disabled={filteredStatement.length === 0}
+          >
+            Export CSV
+          </Button>
         </Space>
         <Text style={{ color: 'var(--text-secondary)', fontSize: '13px' }}>
           Showing {filteredStatement.length} entries

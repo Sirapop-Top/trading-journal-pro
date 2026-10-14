@@ -9,8 +9,10 @@ import {
   Typography,
   Card
 } from 'antd';
-import { UndoOutlined, HistoryOutlined } from '@ant-design/icons';
+import { UndoOutlined, HistoryOutlined, DownloadOutlined } from '@ant-design/icons';
+import dayjs from 'dayjs';
 import { formatCurrency } from '../../lib/constants.js';
+import { exportToCsv } from '../../lib/csvHelper.js';
 
 const { Text } = Typography;
 const { Option } = Select;
@@ -143,6 +145,33 @@ export const RebalanceHistory = ({
     }
   ];
 
+  const handleExportCsv = () => {
+    const filename = `Rebalance_History_${(activePortfolio || 'Portfolio').replace(/\s+/g, '_')}_${dayjs().format('YYYYMMDD')}.csv`;
+    const headers = [
+      'Rebalance ID', 'Date', 'Portfolio', 'Pair ID',
+      'Sold Asset', 'Sold Qty', 'Sold Price',
+      'Bought Asset', 'Bought Qty', 'Bought Price',
+      'Value Moved (THB)', 'Ratio Before (%)', 'Ratio After (%)', 'Status'
+    ];
+    const rows = filteredLogs.map(r => [
+      r.rebalanceId || '',
+      r.executedOn || '',
+      r.portfolio || '',
+      r.pairId || '',
+      r.sellAsset || '',
+      r.sellQty !== undefined ? r.sellQty : '',
+      r.sellPrice !== undefined ? r.sellPrice : '',
+      r.buyAsset || '',
+      r.buyQty !== undefined ? r.buyQty : '',
+      r.buyPrice !== undefined ? r.buyPrice : '',
+      r.valueMovedTHB !== undefined ? Number(r.valueMovedTHB).toFixed(2) : '',
+      r.beforePctA !== undefined ? Number(r.beforePctA).toFixed(1) : '',
+      r.afterPctA !== undefined ? Number(r.afterPctA).toFixed(1) : '',
+      r.status || 'Done'
+    ]);
+    exportToCsv(filename, headers, rows);
+  };
+
   return (
     <Card
       className="glassmorphism-card"
@@ -175,6 +204,14 @@ export const RebalanceHistory = ({
             <Option value="Done">Done</Option>
             <Option value="Reverted">Reverted</Option>
           </Select>
+          <Button
+            icon={<DownloadOutlined />}
+            size="small"
+            onClick={handleExportCsv}
+            disabled={filteredLogs.length === 0}
+          >
+            Export CSV
+          </Button>
         </Space>
       }
     >

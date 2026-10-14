@@ -146,7 +146,7 @@ export const computeTradingAnalytics = (trades = [], statsMap = {}, liveRates = 
 /**
  * Holding calculations for all unique assets, converted to the display currency.
  */
-export const computePositions = (trades = [], livePrices = {}, liveRates = {}, displayCurrency = 'THB') => {
+export const computePositions = (trades = [], livePrices = {}, liveRates = {}, displayCurrency = 'THB', options = {}) => {
   const sorted = sortChronologically(trades);
   const runningHoldings = {}; // key: assetName -> running stats
 
@@ -194,9 +194,15 @@ export const computePositions = (trades = [], livePrices = {}, liveRates = {}, d
       const sellFx = (trade.fxToThb !== undefined && trade.fxToThb !== null && !isNaN(Number(trade.fxToThb)) && Number(trade.fxToThb) > 0)
         ? Number(trade.fxToThb)
         : (liveRates[holding.currency] || 1.0);
-      holding.totalRealizedPnLTHB = (holding.totalRealizedPnLTHB || 0) + (realizedPnL * sellFx);
 
-      holding.totalRealizedPnL += realizedPnL;
+      const inDateRange = (!options.dateRange || !options.dateRange[0] || !options.dateRange[1])
+        || (trade.date >= options.dateRange[0] && trade.date <= options.dateRange[1]);
+
+      if (inDateRange) {
+        holding.totalRealizedPnLTHB = (holding.totalRealizedPnLTHB || 0) + (realizedPnL * sellFx);
+        holding.totalRealizedPnL += realizedPnL;
+      }
+
       holding.qty = Math.max(0, holding.qty - qty);
       holding.totalCost = holding.qty * avgCostBefore;
       if (holding.qty === 0) {

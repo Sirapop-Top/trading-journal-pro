@@ -20,6 +20,7 @@ export const usePortfolioDerived = ({
   liveRates = {},
   displayCurrency = 'THB',
   cashEntries = [],
+  dateRange = null,
   journalActionFilter = 'All',
   journalAssetTypeFilter = 'All',
   journalSearch = '',
@@ -37,15 +38,23 @@ export const usePortfolioDerived = ({
     return trades.filter(t => t.portfolio === activePortfolio);
   }, [trades, activePortfolio]);
 
+  // Date range filtered trades for realized analytics and charts
+  const dateRangeFilteredTrades = useMemo(() => {
+    if (!dateRange || !dateRange[0] || !dateRange[1]) {
+      return filteredTrades;
+    }
+    return filteredTrades.filter(t => t.date >= dateRange[0] && t.date <= dateRange[1]);
+  }, [filteredTrades, dateRange]);
+
   // Running stats for all filtered trades chronologically
   const tradesWithRunningStats = useMemo(() => {
     return computeTradeStats(filteredTrades, livePrices);
   }, [filteredTrades, livePrices]);
 
-  // Advanced Trading Analytics
+  // Advanced Trading Analytics (computed for the selected date range)
   const tradingAnalytics = useMemo(() => {
-    return computeTradingAnalytics(filteredTrades, tradesWithRunningStats, liveRates, displayCurrency);
-  }, [filteredTrades, tradesWithRunningStats, liveRates, displayCurrency]);
+    return computeTradingAnalytics(dateRangeFilteredTrades, tradesWithRunningStats, liveRates, displayCurrency);
+  }, [dateRangeFilteredTrades, tradesWithRunningStats, liveRates, displayCurrency]);
 
   // Search and filtered trades specifically for the Journal Table display
   const journalFilteredTrades = useMemo(() => {
@@ -81,8 +90,8 @@ export const usePortfolioDerived = ({
 
   // Holding calculations for all unique assets, converted to the display currency
   const positions = useMemo(() => {
-    return computePositions(filteredTrades, livePrices, liveRates, displayCurrency);
-  }, [filteredTrades, livePrices, liveRates, displayCurrency]);
+    return computePositions(filteredTrades, livePrices, liveRates, displayCurrency, { dateRange });
+  }, [filteredTrades, livePrices, liveRates, displayCurrency, dateRange]);
 
   // Render positions applying the search and filter query
   const renderedPositions = useMemo(() => {
@@ -141,8 +150,8 @@ export const usePortfolioDerived = ({
 
   // 1. Cumulative Realized P&L Line Chart over Time
   const cumulativePnLData = useMemo(() => {
-    return computeCumulativeRealized(filteredTrades, liveRates, displayCurrency);
-  }, [filteredTrades, liveRates, displayCurrency]);
+    return computeCumulativeRealized(dateRangeFilteredTrades, liveRates, displayCurrency);
+  }, [dateRangeFilteredTrades, liveRates, displayCurrency]);
 
   // 2. Asset Allocation Data (By Category or Asset Name)
   const assetAllocationData = useMemo(() => {
@@ -169,8 +178,8 @@ export const usePortfolioDerived = ({
 
   // 3. P&L by Dimension (Strategy, Category, or Asset Name)
   const pnlDistributionData = useMemo(() => {
-    return computePnlByDimension(filteredTrades, livePrices, liveRates, displayCurrency, pnlDimension, pnlMode, positions);
-  }, [filteredTrades, livePrices, liveRates, displayCurrency, pnlDimension, pnlMode, positions]);
+    return computePnlByDimension(dateRangeFilteredTrades, livePrices, liveRates, displayCurrency, pnlDimension, pnlMode, positions);
+  }, [dateRangeFilteredTrades, livePrices, liveRates, displayCurrency, pnlDimension, pnlMode, positions]);
 
   // 4. Realized P&L Breakdown Data by Asset Name
   const realizedPnLBreakdownData = useMemo(() => {

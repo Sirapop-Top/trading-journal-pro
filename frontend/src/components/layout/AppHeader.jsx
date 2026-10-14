@@ -1,4 +1,4 @@
-import { Layout, Button, Select, Space, Typography, Switch } from 'antd';
+import { Layout, Button, Select, Space, Typography, Switch, DatePicker } from 'antd';
 import {
   EyeInvisibleOutlined,
   EyeOutlined,
@@ -7,6 +7,7 @@ import {
   MenuUnfoldOutlined,
   MenuFoldOutlined
 } from '@ant-design/icons';
+import dayjs from 'dayjs';
 import { useAppData } from '../../context/AppDataContext.jsx';
 
 const { Header } = Layout;
@@ -32,7 +33,11 @@ export const AppHeader = () => {
     setSiderCollapsed,
     autoRefresh,
     setAutoRefresh,
-    syncTime
+    syncTime,
+    dateRangePreset,
+    setDateRangePreset,
+    customDateRange,
+    setCustomDateRange
   } = useAppData();
 
   if (isMobile) {
@@ -71,6 +76,18 @@ export const AppHeader = () => {
           </Select>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <Select
+            value={dateRangePreset}
+            onChange={(val) => setDateRangePreset(val)}
+            style={{ width: 65 }}
+            size="small"
+            dropdownStyle={{ background: 'var(--bg-card)' }}
+          >
+            <Option value="All">All</Option>
+            <Option value="YTD">YTD</Option>
+            <Option value="1Y">1Y</Option>
+            <Option value="3Y">3Y</Option>
+          </Select>
           <Select
             value={displayCurrency}
             onChange={(val) => setDisplayCurrency(val)}
@@ -149,6 +166,34 @@ export const AppHeader = () => {
                 <Option key={p} value={p}>💼 {p}</Option>
               ))}
             </Select>
+          </span>
+
+          <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <Text style={{ fontSize: '12px', color: 'var(--text-secondary)', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Period:</Text>
+            <Select
+              value={dateRangePreset}
+              onChange={(val) => setDateRangePreset(val)}
+              style={{ width: 105 }}
+            >
+              <Option value="All">All Time</Option>
+              <Option value="YTD">YTD</Option>
+              <Option value="1Y">1 Year</Option>
+              <Option value="3Y">3 Years</Option>
+              <Option value="Custom">Custom</Option>
+            </Select>
+            {dateRangePreset === 'Custom' && (
+              <DatePicker.RangePicker
+                style={{ width: 220 }}
+                value={customDateRange && customDateRange[0] ? [dayjs(customDateRange[0]), dayjs(customDateRange[1])] : null}
+                onChange={(dates) => {
+                  if (dates && dates[0] && dates[1]) {
+                    setCustomDateRange([dates[0].format('YYYY-MM-DD'), dates[1].format('YYYY-MM-DD')]);
+                  } else {
+                    setCustomDateRange(null);
+                  }
+                }}
+              />
+            )}
           </span>
 
           <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>

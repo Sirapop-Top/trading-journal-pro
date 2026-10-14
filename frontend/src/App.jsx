@@ -10,10 +10,12 @@ import { JournalTab } from './components/journal/JournalTab.jsx';
 import { PositionsTab } from './components/positions/PositionsTab.jsx';
 import { RebalanceTab } from './components/rebalance/RebalanceTab.jsx';
 import { CashTab } from './components/cash/CashTab.jsx';
+import { AnalyticsTab } from './components/analytics/AnalyticsTab.jsx';
 import { SettingsTab } from './components/settings/SettingsTab.jsx';
 import { LogTradeModal } from './components/modals/LogTradeModal.jsx';
 import { EditStrategyModal } from './components/modals/EditStrategyModal.jsx';
 import { PortfolioModals } from './components/modals/PortfolioModals.jsx';
+import { CsvImportModal } from './components/modals/CsvImportModal.jsx';
 
 const { Content } = Layout;
 
@@ -26,7 +28,11 @@ const AppContent = () => {
     trades,
     cloudConnectionError,
     fetchData,
-    activeTab
+    activeTab,
+    isOnline,
+    syncTime,
+    isImportModalOpen,
+    setIsImportModalOpen
   } = useAppData();
 
   if (!isConnected) {
@@ -49,6 +55,15 @@ const AppContent = () => {
         {/* Content Area */}
         <Content style={{ padding: isMobile ? '12px 10px 80px 10px' : '24px', minHeight: 280, overflowY: 'auto' }}>
           <Spin spinning={isSyncing && trades.length === 0} tip="Syncing Terminal Feed...">
+            {!isOnline && (
+              <Alert
+                message={<strong>Offline Mode — Showing Cached Snapshot</strong>}
+                description={`You are currently disconnected. Viewing local cached data${syncTime ? ` from ${syncTime}` : ''}.`}
+                type="warning"
+                showIcon
+                style={{ marginBottom: '16px', border: '1px solid rgba(250, 173, 20, 0.3)', background: 'rgba(250, 173, 20, 0.08)' }}
+              />
+            )}
             {cloudConnectionError && (
               <Alert
                 message={<strong>Cloud Sync Connection Blocked</strong>}
@@ -94,6 +109,7 @@ const AppContent = () => {
             {activeTab === 'positions' && <PositionsTab />}
             {activeTab === 'rebalance' && <RebalanceTab />}
             {activeTab === 'cash' && <CashTab />}
+            {activeTab === 'analytics' && <AnalyticsTab />}
             {activeTab === 'settings' && <SettingsTab />}
           </Spin>
         </Content>
@@ -103,6 +119,9 @@ const AppContent = () => {
       <LogTradeModal />
       <EditStrategyModal />
       <PortfolioModals />
+      {isImportModalOpen && (
+        <CsvImportModal open={isImportModalOpen} onClose={() => setIsImportModalOpen(false)} />
+      )}
 
       {/* Mobile Bottom Tab Bar */}
       <MobileTabBar />
