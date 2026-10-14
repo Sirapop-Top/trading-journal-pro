@@ -180,3 +180,19 @@ export const executeRebalanceApi = async (scriptUrl, rebalance) => {
 export const revertRebalanceApi = async (scriptUrl, rebalanceId) => {
   return await postAction(scriptUrl, 'revertRebalance', { rebalanceId });
 };
+
+/**
+ * Cash Ledger endpoints (Step 5 Accounting)
+ */
+export const addCashEntryApi = async (scriptUrl, entry) => {
+  return await postAction(scriptUrl, 'addCashEntry', { entry });
+};
+
+export const editCashEntryApi = async (scriptUrl, entry) => {
+  return await postAction(scriptUrl, 'editCashEntry', { entry });
+};
+
+export const deleteCashEntryApi = async (scriptUrl, entryId) => {
+  return await postAction(scriptUrl, 'deleteCashEntry', { entryId });
+};
+

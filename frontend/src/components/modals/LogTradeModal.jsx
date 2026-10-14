@@ -18,8 +18,11 @@ export const LogTradeModal = () => {
     setFormAction,
     tickerValidation,
     setTickerValidation,
-    handleValidateTicker
+    handleValidateTicker,
+    liveRates
   } = useAppData();
+
+  const selectedCurrency = Form.useWatch('currency', tradeForm) || 'THB';
 
   return (
     <Modal
@@ -27,7 +30,7 @@ export const LogTradeModal = () => {
       open={isTradeModalOpen}
       onCancel={() => setIsTradeModalOpen(false)}
       footer={null}
-      width={600}
+      width={640}
     >
       <Form
         form={tradeForm}
@@ -37,6 +40,7 @@ export const LogTradeModal = () => {
           portfolio: activePortfolio === 'All Portfolios' ? (portfolios[0] || 'Main Investment') : activePortfolio,
           action: 'Buy',
           currency: 'THB',
+          fxToThb: 1.0,
           assetType: 'Thai Stock',
           date: dayjs(),
           feeAmount: 0.0
@@ -152,9 +156,9 @@ export const LogTradeModal = () => {
           </Col>
         </Row>
 
-        {/* Row 2: Transaction Date, Select Portfolio Target, Local Currency */}
+        {/* Row 2: Transaction Date, Select Portfolio Target, Local Currency, FX Rate */}
         <Row gutter={16}>
-          <Col xs={24} sm={8}>
+          <Col xs={24} sm={7}>
             <Form.Item
               name="date"
               label="Transaction Date"
@@ -164,10 +168,10 @@ export const LogTradeModal = () => {
             </Form.Item>
           </Col>
           
-          <Col xs={24} sm={10}>
+          <Col xs={24} sm={7}>
             <Form.Item
               name="portfolio"
-              label="Select Portfolio Target"
+              label="Portfolio Target"
               rules={[{ required: true, message: 'Please select a portfolio' }]}
             >
               <Select>
@@ -178,17 +182,36 @@ export const LogTradeModal = () => {
             </Form.Item>
           </Col>
           
-          <Col xs={24} sm={6}>
+          <Col xs={24} sm={5}>
             <Form.Item
               name="currency"
-              label="Local Currency"
+              label="Currency"
               rules={[{ required: true, message: 'Select Currency' }]}
             >
-              <Select>
+              <Select onChange={(curr) => {
+                const fx = liveRates[curr] || 1.0;
+                tradeForm.setFieldsValue({ fxToThb: fx });
+              }}>
                 <Option value="THB">THB (฿)</Option>
                 <Option value="USD">USD ($)</Option>
                 <Option value="EUR">EUR (€)</Option>
               </Select>
+            </Form.Item>
+          </Col>
+
+          <Col xs={24} sm={5}>
+            <Form.Item
+              name="fxToThb"
+              label="FX To THB"
+              rules={[{ required: true, message: 'FX rate' }]}
+              extra={selectedCurrency !== 'THB' ? `Live: ${liveRates[selectedCurrency] || 1.0}` : null}
+            >
+              <InputNumber
+                style={{ width: '100%' }}
+                precision={4}
+                min={0.0001}
+                disabled={selectedCurrency === 'THB'}
+              />
             </Form.Item>
           </Col>
         </Row>

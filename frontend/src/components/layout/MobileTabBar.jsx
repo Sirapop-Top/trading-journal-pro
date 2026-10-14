@@ -3,6 +3,7 @@ import {
   BookOutlined,
   TableOutlined,
   SwapOutlined,
+  WalletOutlined,
   SettingOutlined
 } from '@ant-design/icons';
 import { Badge } from 'antd';
@@ -44,6 +45,13 @@ export const MobileTabBar = () => {
           <SwapOutlined className="mobile-tabbar-icon" />
         </Badge>
         <span>Rebalance</span>
+      </button>
+      <button 
+        className={`mobile-tabbar-item ${activeTab === 'cash' ? 'active' : ''}`}
+        onClick={() => setActiveTab('cash')}
+      >
+        <WalletOutlined className="mobile-tabbar-icon" />
+        <span>Cash</span>
       </button>
       <button 
         className={`mobile-tabbar-item ${activeTab === 'settings' ? 'active' : ''}`}

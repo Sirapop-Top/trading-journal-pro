@@ -93,7 +93,9 @@ export const computeTradingAnalytics = (trades = [], statsMap = {}, liveRates = 
     const stats = statsMap[trade.id];
     if (!stats) return;
 
-    const rateToTHB = liveRates[trade.currency] || 1.0;
+    const rateToTHB = (trade.fxToThb !== undefined && trade.fxToThb !== null && !isNaN(Number(trade.fxToThb)) && Number(trade.fxToThb) > 0)
+      ? Number(trade.fxToThb)
+      : (liveRates[trade.currency] || 1.0);
     const displayRateToTHB = liveRates[displayCurrency] || 1.0;
 
     if ((trade.action || '').toLowerCase() === 'sell') {
@@ -131,6 +133,8 @@ export const computeTradingAnalytics = (trades = [], statsMap = {}, liveRates = 
     totalClosedTrades,
     winRate,
     profitFactor,
+    grossProfit,
+    grossLoss,
     avgWin,
     avgLoss,
     riskRewardRatio,
@@ -187,6 +191,11 @@ export const computePositions = (trades = [], livePrices = {}, liveRates = {}, d
       const costOfSharesSold = qty * avgCostBefore;
       const realizedPnL = revenue - costOfSharesSold;
 
+      const sellFx = (trade.fxToThb !== undefined && trade.fxToThb !== null && !isNaN(Number(trade.fxToThb)) && Number(trade.fxToThb) > 0)
+        ? Number(trade.fxToThb)
+        : (liveRates[holding.currency] || 1.0);
+      holding.totalRealizedPnLTHB = (holding.totalRealizedPnLTHB || 0) + (realizedPnL * sellFx);
+
       holding.totalRealizedPnL += realizedPnL;
       holding.qty = Math.max(0, holding.qty - qty);
       holding.totalCost = holding.qty * avgCostBefore;
@@ -215,7 +224,7 @@ export const computePositions = (trades = [], livePrices = {}, liveRates = {}, d
     const totalCostConverted = (totalCost * rateToTHB) / displayRateToTHB;
     const liveValueConverted = (liveValue * rateToTHB) / displayRateToTHB;
     const unrealizedPnLConverted = (unrealizedPnL * rateToTHB) / displayRateToTHB;
-    const realizedPnLConverted = (realizedPnL * rateToTHB) / displayRateToTHB;
+    const realizedPnLConverted = ((holding.totalRealizedPnLTHB !== undefined ? holding.totalRealizedPnLTHB : (realizedPnL * rateToTHB))) / displayRateToTHB;
     const totalPnLConverted = unrealizedPnLConverted + realizedPnLConverted;
     const wacConverted = (wac * rateToTHB) / displayRateToTHB;
     const livePriceConverted = (livePrice * rateToTHB) / displayRateToTHB;
@@ -344,7 +353,9 @@ export const computeCumulativeRealized = (trades = [], liveRates = {}, displayCu
     if (isSell) {
       const stats = statsMap[trade.id];
       if (stats) {
-        const rateToTHB = liveRates[trade.currency] || 1.0;
+        const rateToTHB = (trade.fxToThb !== undefined && trade.fxToThb !== null && !isNaN(Number(trade.fxToThb)) && Number(trade.fxToThb) > 0)
+          ? Number(trade.fxToThb)
+          : (liveRates[trade.currency] || 1.0);
         const displayRateToTHB = liveRates[displayCurrency] || 1.0;
         const realizedConverted = (stats.realizedPnL * rateToTHB) / displayRateToTHB;
         runningRealizedPnL += realizedConverted;
@@ -405,7 +416,9 @@ export const computePnlByDimension = (
 
         const stats = statsMap[trade.id];
         const realized = stats ? stats.realizedPnL : 0;
-        const rateToTHB = liveRates[trade.currency] || 1.0;
+        const rateToTHB = (trade.fxToThb !== undefined && trade.fxToThb !== null && !isNaN(Number(trade.fxToThb)) && Number(trade.fxToThb) > 0)
+          ? Number(trade.fxToThb)
+          : (liveRates[trade.currency] || 1.0);
         const displayRateToTHB = liveRates[displayCurrency] || 1.0;
         const realizedConverted = (realized * rateToTHB) / displayRateToTHB;
 

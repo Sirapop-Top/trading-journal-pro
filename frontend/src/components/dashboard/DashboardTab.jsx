@@ -17,7 +17,8 @@ export const DashboardTab = () => {
     formatCurrency,
     displayCurrency,
     dueCount,
-    setActiveTab
+    setActiveTab,
+    cashKpis
   } = useAppData();
 
   if (isMobile) {
@@ -139,6 +140,24 @@ export const DashboardTab = () => {
           type="error"
           showIcon
           style={{ background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.3)' }}
+        />
+      )}
+
+      {/* Opening Deposit Advisory Banner */}
+      {!cashKpis?.hasDeposit && (
+        <Alert
+          message={<strong>No Opening Deposit Recorded</strong>}
+          description={
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+              <span>Cash on Hand is currently calculated from portfolio initial capital. Record an Opening Deposit to unlock exact ledger statement accounting.</span>
+              <Button type="primary" size="small" onClick={() => setActiveTab('cash')} style={{ background: 'var(--primary-color)', color: '#06080f', borderColor: 'var(--primary-color)', fontWeight: 'bold' }}>
+                Open Cash & Income &rarr;
+              </Button>
+            </div>
+          }
+          type="info"
+          showIcon
+          style={{ background: 'rgba(0, 242, 254, 0.08)', border: '1px solid rgba(0, 242, 254, 0.25)' }}
         />
       )}
 

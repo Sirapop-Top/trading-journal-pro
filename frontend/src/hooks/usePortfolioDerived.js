@@ -10,6 +10,7 @@ import {
   computeCumulativeRealized,
   computePnlByDimension
 } from '../lib/portfolioEngine.js';
+import { hasDeposit, computeCashBalance } from '../lib/cashEngine.js';
 
 export const usePortfolioDerived = ({
   trades = [],
@@ -18,6 +19,7 @@ export const usePortfolioDerived = ({
   livePrices = {},
   liveRates = {},
   displayCurrency = 'THB',
+  cashEntries = [],
   journalActionFilter = 'All',
   journalAssetTypeFilter = 'All',
   journalSearch = '',
@@ -104,14 +106,38 @@ export const usePortfolioDerived = ({
   // Portfolio capital configuration and target sizing calculations
   const portfolioSizing = useMemo(() => {
     const configs = JSON.parse(localStorage.getItem('alphatrader_portfolio_configs') || '{}');
-    return computePortfolioSizing({
+    const baseSizing = computePortfolioSizing({
       portfolios,
       activePortfolio,
       configs,
       kpis,
       positions
     });
-  }, [portfolios, activePortfolio, kpis, positions]);
+
+    const depositExists = hasDeposit(activePortfolio, cashEntries);
+    if (depositExists) {
+      const { cashBalance } = computeCashBalance({
+        portfolio: activePortfolio,
+        cashEntries,
+        trades,
+        liveRates,
+        displayCurrency,
+        fallbackCashOnHand: baseSizing.cashOnHand
+      });
+      const posSizeCash = baseSizing.targetStocks > 0 ? cashBalance / baseSizing.targetStocks : 0;
+      return {
+        ...baseSizing,
+        cashOnHand: cashBalance,
+        positionSizeCash: posSizeCash,
+        hasDeposit: true
+      };
+    }
+
+    return {
+      ...baseSizing,
+      hasDeposit: false
+    };
+  }, [portfolios, activePortfolio, kpis, positions, cashEntries, trades, liveRates, displayCurrency]);
 
   // 1. Cumulative Realized P&L Line Chart over Time
   const cumulativePnLData = useMemo(() => {

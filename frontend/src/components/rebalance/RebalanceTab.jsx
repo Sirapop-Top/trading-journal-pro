@@ -36,6 +36,7 @@ export const RebalanceTab = () => {
     isCensored,
     pairsWithStatus,
     dueCount,
+    portfolioSizing,
     rebalanceLog,
     handleSavePair,
     handleTogglePairStatus,
@@ -267,6 +268,7 @@ export const RebalanceTab = () => {
         livePrices={livePrices}
         liveRates={liveRates}
         displayCurrency={displayCurrency}
+        cashOnHand={portfolioSizing?.cashOnHand}
         onClose={() => {
           setIsCalcOpen(false);
           setSelectedCalcPair(null);

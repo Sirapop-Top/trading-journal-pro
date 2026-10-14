@@ -152,6 +152,9 @@ export const useTradeActions = ({
       const quantity = Number(values.quantity);
       const priceUnit = Number(values.priceUnit);
       const feeAmount = values.feeAmount !== undefined ? Number(values.feeAmount) : 0.0;
+      const fxToThb = values.fxToThb !== undefined && values.fxToThb !== null && !isNaN(Number(values.fxToThb))
+        ? Number(values.fxToThb)
+        : (journal.liveRates[values.currency] || 1.0);
 
       const tradePayload = {
         date: formattedDate,
@@ -164,7 +167,8 @@ export const useTradeActions = ({
         why: values.why || '',
         remark: values.remark || '',
         portfolio: values.portfolio,
-        feeAmount
+        feeAmount,
+        fxToThb
       };
 
       if (!scriptUrl) {

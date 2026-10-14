@@ -187,4 +187,28 @@ describe('portfolioEngine core WAC calculations', () => {
     expect(analytics.winRate).toBe(50);
     expect(analytics.profitFactor).toBe(2.5);
   });
+
+  it('honors trade-date fxToThb for realized PnL in THB', () => {
+    const trades = [
+      { id: '1', date: '2026-06-01', assetName: 'AAPL', action: 'Buy', quantity: 10, priceUnit: 150, feeAmount: 0, currency: 'USD', fxToThb: 34.0 },
+      { id: '2', date: '2026-06-15', assetName: 'AAPL', action: 'Sell', quantity: 10, priceUnit: 160, feeAmount: 0, currency: 'USD', fxToThb: 36.5 }
+    ];
+    // Live rate is 32.0 (different from sell date rate 36.5)
+    const liveRates = { USD: 32.0, THB: 1.0 };
+    // Realized PnL in USD = (160 - 150) * 10 = $100.
+    // In THB, using trade-date FX 36.5: 100 * 36.5 = 3650 THB. (If live rate was used, it would be 3200 THB).
+    const positions = computePositions(trades, {}, liveRates, 'THB');
+    expect(positions[0].realizedPnLConverted).toBe(3650);
+
+    const statsMap = computeTradeStats(trades);
+    const analytics = computeTradingAnalytics(trades, statsMap, liveRates, 'THB');
+    expect(analytics.grossProfit).toBe(3650);
+
+    const cumulative = computeCumulativeRealized(trades, liveRates, 'THB');
+    expect(cumulative[cumulative.length - 1].PnL).toBe(3650);
+
+    const dimension = computePnlByDimension(trades, {}, liveRates, 'THB', 'name', 'realized', positions);
+    expect(dimension[0].PnL).toBe(3650);
+  });
 });
+

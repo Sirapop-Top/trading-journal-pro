@@ -37,3 +37,22 @@ export const formatCurrency = (val, currencyCode = 'THB', isCensored = false) =>
   });
   return `${symbol} ${formattedNum}`.trim();
 };
+
+export const CASH_ENTRY_KINDS = [
+  'Deposit',
+  'Withdraw',
+  'Dividend',
+  'Interest',
+  'Fee',
+  'Tax'
+];
+
+export const CASH_KIND_COLORS = {
+  'Deposit': '#10b981',
+  'Withdraw': '#f43f5e',
+  'Dividend': '#00f2fe',
+  'Interest': '#8b5cf6',
+  'Fee': '#f59e0b',
+  'Tax': '#ec4899'
+};
+

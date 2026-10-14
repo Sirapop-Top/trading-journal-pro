@@ -16,6 +16,7 @@ export const useJournalData = () => {
   const [isCensored, setIsCensored] = useState(false);
   const [rebalancePairs, setRebalancePairs] = useState([]);
   const [rebalanceLog, setRebalanceLog] = useState([]);
+  const [cashLedger, setCashLedger] = useState([]);
 
   const toggleCensored = useCallback(() => {
     setIsCensored(prev => !prev);
@@ -71,6 +72,7 @@ export const useJournalData = () => {
     const portfolioIdx = findColIdx(['portfolio', 'port']);
     const feeAmountIdx = findColIdx(['fee amount', 'fee_amount', 'fee']);
     const rebalanceIdIdx = findColIdx(['rebalance id', 'rebalance_id']);
+    const fxToThbIdx = findColIdx(['fx to thb', 'fx_to_thb', 'fxtothb']);
 
     const loadedTrades = [];
     const loadedPortfolios = new Set();
@@ -188,7 +190,8 @@ export const useJournalData = () => {
         why: whyIdx !== -1 && row[whyIdx] ? row[whyIdx].toString().trim() : '',
         remark: remarkIdx !== -1 && row[remarkIdx] ? row[remarkIdx].toString().trim() : '',
         feeAmount: parsedFee,
-        rebalanceId
+        rebalanceId,
+        fxToThb: fxToThbIdx !== -1 && row[fxToThbIdx] !== '' && !isNaN(parseFloat(row[fxToThbIdx])) ? parseFloat(row[fxToThbIdx]) : null
       });
 
       loadedPortfolios.add(portfolio);
@@ -289,6 +292,45 @@ export const useJournalData = () => {
     }
     setRebalanceLog(loadedLog);
 
+    // Fetch Cash Ledger
+    let loadedCashLedger = [];
+    try {
+      const cashRows = await fetchSheetCsv(sheetId, 'Cash_Ledger');
+      if (cashRows.length > 1) {
+        const cH = cashRows[0].map(h => h.toString().toLowerCase().trim());
+        const getVal = (r, k, def = '') => {
+          const idx = cH.indexOf(k.toLowerCase());
+          return idx !== -1 && r[idx] !== undefined && r[idx] !== '' ? r[idx] : def;
+        };
+        for (let r = 1; r < cashRows.length; r++) {
+          const row = cashRows[r];
+          const entryId = getVal(row, 'entry id', '');
+          if (!entryId) continue;
+          let dateVal = getVal(row, 'entry date', '');
+          if (dateVal && dayjs(dateVal).isValid()) {
+            dateVal = dayjs(dateVal).format('YYYY-MM-DD');
+          }
+          loadedCashLedger.push({
+            entryId: String(entryId),
+            date: dateVal,
+            portfolio: String(getVal(row, 'portfolio', 'Main Trading')),
+            kind: String(getVal(row, 'kind', 'Deposit')),
+            asset: String(getVal(row, 'asset', '')).toUpperCase(),
+            currency: String(getVal(row, 'currency', 'THB')),
+            gross: parseFloat(getVal(row, 'gross', 0)) || 0,
+            withholdingTax: parseFloat(getVal(row, 'withholding tax', 0)) || 0,
+            net: parseFloat(getVal(row, 'net', 0)) || 0,
+            fxToThb: parseFloat(getVal(row, 'fx to thb', 1.0)) || 1.0,
+            note: String(getVal(row, 'note', '')),
+            created: String(getVal(row, 'created', ''))
+          });
+        }
+      }
+    } catch {
+      // Non-critical if Cash_Ledger tab is not yet created
+    }
+    setCashLedger(loadedCashLedger);
+
     const rates = await fetchExchangeRates();
     setLiveRates(rates);
     setSyncTime(dayjs().format('YYYY-MM-DD HH:mm:ss'));
@@ -319,6 +361,9 @@ export const useJournalData = () => {
           if (data && Array.isArray(data.rebalanceLog) && data.rebalanceLog.length > 0) {
             setRebalanceLog(data.rebalanceLog);
           }
+          if (data && Array.isArray(data.cashLedger) && data.cashLedger.length > 0) {
+            setCashLedger(data.cashLedger);
+          }
         }
       } catch (priceErr) {
         console.warn('Live prices from Apps Script unavailable, using WAC fallback:', priceErr);
@@ -348,6 +393,9 @@ export const useJournalData = () => {
         }
         if (Array.isArray(data.rebalanceLog) && data.rebalanceLog.length > 0) {
           setRebalanceLog(data.rebalanceLog);
+        }
+        if (Array.isArray(data.cashLedger) && data.cashLedger.length > 0) {
+          setCashLedger(data.cashLedger);
         }
         if (data.syncTime) {
           setSyncTime(dayjs(data.syncTime).format('YYYY-MM-DD HH:mm:ss'));
@@ -433,6 +481,8 @@ export const useJournalData = () => {
     setRebalancePairs,
     rebalanceLog,
     setRebalanceLog,
+    cashLedger,
+    setCashLedger,
     googleSheetId,
     setGoogleSheetId,
     isSyncingSheet,

@@ -9,6 +9,7 @@ import { DashboardTab } from './components/dashboard/DashboardTab.jsx';
 import { JournalTab } from './components/journal/JournalTab.jsx';
 import { PositionsTab } from './components/positions/PositionsTab.jsx';
 import { RebalanceTab } from './components/rebalance/RebalanceTab.jsx';
+import { CashTab } from './components/cash/CashTab.jsx';
 import { SettingsTab } from './components/settings/SettingsTab.jsx';
 import { LogTradeModal } from './components/modals/LogTradeModal.jsx';
 import { EditStrategyModal } from './components/modals/EditStrategyModal.jsx';
@@ -92,6 +93,7 @@ const AppContent = () => {
             {activeTab === 'journal' && <JournalTab />}
             {activeTab === 'positions' && <PositionsTab />}
             {activeTab === 'rebalance' && <RebalanceTab />}
+            {activeTab === 'cash' && <CashTab />}
             {activeTab === 'settings' && <SettingsTab />}
           </Spin>
         </Content>

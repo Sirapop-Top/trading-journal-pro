@@ -3,7 +3,7 @@
 // Schema Version: 2.0 (Rebalance & Multi-Asset Support)
 // ==========================================
 
-var SCHEMA_VERSION = "2.0";
+var SCHEMA_VERSION = "2.1";
 
 function doGet(e) {
   var action = e ? e.parameter.action : "";
@@ -70,6 +70,15 @@ function doPost(e) {
     } else if (action === "revertRebalance") {
       return ContentService.createTextOutput(JSON.stringify(revertRebalance(contents.rebalanceId)))
         .setMimeType(ContentService.MimeType.JSON);
+    } else if (action === "addCashEntry") {
+      return ContentService.createTextOutput(JSON.stringify(addCashEntry(contents.entry)))
+        .setMimeType(ContentService.MimeType.JSON);
+    } else if (action === "editCashEntry") {
+      return ContentService.createTextOutput(JSON.stringify(editCashEntry(contents.entry)))
+        .setMimeType(ContentService.MimeType.JSON);
+    } else if (action === "deleteCashEntry") {
+      return ContentService.createTextOutput(JSON.stringify(deleteCashEntry(contents.entryId)))
+        .setMimeType(ContentService.MimeType.JSON);
     }
     
     // Fallback for legacy direct uploads
@@ -86,7 +95,7 @@ var JOURNAL_HEADERS = [
   "Timestamp", "Date", "Asset Name", "Asset Type", "Currency", 
   "Action", "Quantity", "Price/Unit", "Amount", "Current Price", 
   "Current Value", "P&L", "P&L %", "Why (Decision Reason)", 
-  "Remark", "Portfolio", "Fee Amount", "Rebalance ID"
+  "Remark", "Portfolio", "Fee Amount", "Rebalance ID", "FX To THB"
 ];
 
 var PORTFOLIOS_HEADERS = [
@@ -107,6 +116,12 @@ var REBALANCE_LOG_HEADERS = [
   "Buy Asset", "Buy Qty", "Buy Price", "Buy Fee", 
   "Value Moved THB", "Before A %", "Target A %", "After A %", 
   "Realized PnL THB", "Reason", "Status", "Created"
+];
+
+var CASH_LEDGER_HEADERS = [
+  "Entry ID", "Entry Date", "Portfolio", "Kind", "Asset", 
+  "Currency", "Gross", "Withholding Tax", "Net", "FX To THB", 
+  "Note", "Created"
 ];
 
 // Self-healing database structure initialization with SCHEMA_VERSION check
@@ -187,6 +202,8 @@ function ensureTableStructure() {
             cleanH = "Why (Decision Reason)";
           } else if (hLower.indexOf("remark") !== -1 || hLower.indexOf("note") !== -1) {
             cleanH = "Remark";
+          } else if (hLower.indexOf("fx") !== -1) {
+            cleanH = "FX To THB";
           }
         }
         
@@ -417,6 +434,59 @@ function ensureTableStructure() {
     }
   }
   
+  // 5. Repair or create Cash_Ledger sheet
+  var cashSheet = ss.getSheetByName("Cash_Ledger");
+  if (!cashSheet) {
+    cashSheet = ss.insertSheet("Cash_Ledger");
+    cashSheet.getRange(1, 1, 1, CASH_LEDGER_HEADERS.length).setValues([CASH_LEDGER_HEADERS]);
+    cashSheet.getRange(1, 1, 1, CASH_LEDGER_HEADERS.length).setFontWeight("bold");
+    cashSheet.setFrozenRows(1);
+  } else {
+    var clLastCol = cashSheet.getLastColumn();
+    if (clLastCol === 0) {
+      cashSheet.getRange(1, 1, 1, CASH_LEDGER_HEADERS.length).setValues([CASH_LEDGER_HEADERS]);
+      cashSheet.getRange(1, 1, 1, CASH_LEDGER_HEADERS.length).setFontWeight("bold");
+      cashSheet.setFrozenRows(1);
+    } else {
+      var rawHeaders = cashSheet.getRange(1, 1, 1, clLastCol).getValues()[0];
+      var cleanHeaders = [];
+      var changed = false;
+      
+      for (var i = 0; i < rawHeaders.length; i++) {
+        var h = rawHeaders[i].toString().trim();
+        var hLower = h.toLowerCase();
+        var cleanH = h;
+        
+        for (var j = 0; j < CASH_LEDGER_HEADERS.length; j++) {
+          if (hLower === CASH_LEDGER_HEADERS[j].toLowerCase()) {
+            cleanH = CASH_LEDGER_HEADERS[j];
+            break;
+          }
+        }
+        if (cleanH !== h) changed = true;
+        cleanHeaders.push(cleanH);
+      }
+      
+      if (changed) {
+        cashSheet.getRange(1, 1, 1, cleanHeaders.length).setValues([cleanHeaders]);
+        cashSheet.getRange(1, 1, 1, cleanHeaders.length).setFontWeight("bold");
+      }
+      
+      var currentHeadersLower = cleanHeaders.map(function(ch) { return ch.toLowerCase().trim(); });
+      var missingHeaders = [];
+      for (var i = 0; i < CASH_LEDGER_HEADERS.length; i++) {
+        var hLower = CASH_LEDGER_HEADERS[i].toLowerCase().trim();
+        if (currentHeadersLower.indexOf(hLower) === -1) {
+          missingHeaders.push(CASH_LEDGER_HEADERS[i]);
+        }
+      }
+      if (missingHeaders.length > 0) {
+        cashSheet.getRange(1, clLastCol + 1, 1, missingHeaders.length).setValues([missingHeaders]);
+        cashSheet.getRange(1, clLastCol + 1, 1, missingHeaders.length).setFontWeight("bold");
+      }
+    }
+  }
+  
   if (needsHeavyMigration) {
     props.setProperty("SCHEMA_VERSION", SCHEMA_VERSION);
   }
@@ -446,6 +516,15 @@ function nextId(prefix) {
         var vals = lSheet.getRange(2, 1, lSheet.getLastRow() - 1, 1).getValues();
         for (var i = 0; i < vals.length; i++) {
           var m = String(vals[i][0]).match(/RB-(\d+)/i);
+          if (m) seq = Math.max(seq, parseInt(m[1], 10));
+        }
+      }
+    } else if (prefix === "CL") {
+      var cSheet = ss.getSheetByName("Cash_Ledger");
+      if (cSheet && cSheet.getLastRow() >= 2) {
+        var vals = cSheet.getRange(2, 1, cSheet.getLastRow() - 1, 1).getValues();
+        for (var i = 0; i < vals.length; i++) {
+          var m = String(vals[i][0]).match(/CL-(\d+)/i);
           if (m) seq = Math.max(seq, parseInt(m[1], 10));
         }
       }
@@ -535,6 +614,7 @@ function getDashboardData() {
     var portfolioIdx = findColIdx(["portfolio", "port"]);
     var feeAmountIdx = findColIdx(["fee amount", "fee_amount", "fee"]);
     var rebalanceIdIdx = findColIdx(["rebalance id", "rebalance_id"]);
+    var fxToThbIdx = findColIdx(["fx to thb", "fx_to_thb", "fxtothb"]);
     
     for (var i = 1; i < rows.length; i++) {
       var row = rows[i];
@@ -581,6 +661,9 @@ function getDashboardData() {
       }
       
       var rebalanceId = rebalanceIdIdx !== -1 && row[rebalanceIdIdx] ? row[rebalanceIdIdx].toString().trim() : "";
+      var parsedFx = fxToThbIdx !== -1 && row[fxToThbIdx] !== "" && !isNaN(parseFloat(row[fxToThbIdx])) ? parseFloat(row[fxToThbIdx]) : null;
+      var curVal = currencyIdx !== -1 && row[currencyIdx] ? row[currencyIdx].toString().trim() : "THB";
+      if (parsedFx === null && curVal === "THB") parsedFx = 1.0;
       
       var trade = {
         id: (i + 1).toString(), 
@@ -588,14 +671,15 @@ function getDashboardData() {
         portfolio: portfolio,
         assetName: assetName,
         assetType: assetType,
-        currency: currencyIdx !== -1 && row[currencyIdx] ? row[currencyIdx].toString().trim() : "THB",
+        currency: curVal,
         action: actionIdx !== -1 && row[actionIdx] ? row[actionIdx].toString().trim() : "Buy",
         quantity: qty,
         priceUnit: price,
         why: whyIdx !== -1 && row[whyIdx] ? row[whyIdx].toString().trim() : "",
         remark: remarkIdx !== -1 && row[remarkIdx] ? row[remarkIdx].toString().trim() : "",
         feeAmount: feeAmount,
-        rebalanceId: rebalanceId
+        rebalanceId: rebalanceId,
+        fxToThb: parsedFx
       };
       
       trades.push(trade);
@@ -811,12 +895,57 @@ function getDashboardData() {
     }
   } catch(e) {}
   
+  // Read Cash Ledger
+  var cashLedger = [];
+  try {
+    var clSheet = ss.getSheetByName("Cash_Ledger");
+    if (clSheet && clSheet.getLastRow() >= 2) {
+      var clRows = clSheet.getDataRange().getValues();
+      var clH = clRows[0].map(function(h) { return h.toString().toLowerCase().trim(); });
+      
+      function getClVal(row, key, def) {
+        var idx = clH.indexOf(key.toLowerCase());
+        return idx !== -1 && row[idx] !== undefined && row[idx] !== "" ? row[idx] : def;
+      }
+      
+      for (var c = 1; c < clRows.length; c++) {
+        var clRow = clRows[c];
+        var eId = getClVal(clRow, "entry id", "");
+        if (!eId) continue;
+        
+        var dVal = "";
+        var rawD = getClVal(clRow, "entry date", "");
+        if (rawD instanceof Date) {
+          dVal = Utilities.formatDate(rawD, Session.getScriptTimeZone(), "yyyy-MM-dd");
+        } else if (rawD) {
+          dVal = rawD.toString().split(" ")[0].trim();
+        }
+        
+        cashLedger.push({
+          entryId: String(eId),
+          date: dVal,
+          portfolio: String(getClVal(clRow, "portfolio", "Main Trading")),
+          kind: String(getClVal(clRow, "kind", "Deposit")),
+          asset: String(getClVal(clRow, "asset", "")).toUpperCase(),
+          currency: String(getClVal(clRow, "currency", "THB")),
+          gross: parseFloat(getClVal(clRow, "gross", 0)) || 0,
+          withholdingTax: parseFloat(getClVal(clRow, "withholding tax", 0)) || 0,
+          net: parseFloat(getClVal(clRow, "net", 0)) || 0,
+          fxToThb: parseFloat(getClVal(clRow, "fx to thb", 1.0)) || 1.0,
+          note: String(getClVal(clRow, "note", "")),
+          created: String(getClVal(clRow, "created", ""))
+        });
+      }
+    }
+  } catch (e) {}
+  
   return {
     trades: trades,
     portfolios: portfolios,
     portfolioConfigs: portfolioConfigs,
     rebalancePairs: rebalancePairs,
     rebalanceLog: rebalanceLog,
+    cashLedger: cashLedger,
     livePrices: livePrices,
     liveRates: liveRates,
     syncTime: new Date().toISOString()
@@ -854,6 +983,7 @@ function buildJournalRow(headers, newRowIdx, trade) {
   var portfolioIdx = getIndex(["portfolio", "port"]);
   var feeAmountIdx = getIndex(["fee amount", "fee_amount", "fee"]);
   var rebalanceIdIdx = getIndex(["rebalance id", "rebalance_id"]);
+  var fxToThbIdx = getIndex(["fx to thb", "fx_to_thb", "fxtothb"]);
   
   var amountIdx = getIndex(["amount"]);
   var curPriceIdx = getIndex(["current price"]);
@@ -883,6 +1013,9 @@ function buildJournalRow(headers, newRowIdx, trade) {
   if (portfolioIdx !== -1) rowValues[portfolioIdx] = trade.portfolio || "Main Trading";
   if (feeAmountIdx !== -1) rowValues[feeAmountIdx] = parseFloat(trade.feeAmount) || 0.0;
   if (rebalanceIdIdx !== -1) rowValues[rebalanceIdIdx] = sanitizeString(trade.rebalanceId || "");
+  if (fxToThbIdx !== -1) {
+    rowValues[fxToThbIdx] = (trade.fxToThb !== undefined && trade.fxToThb !== null && trade.fxToThb !== '') ? parseFloat(trade.fxToThb) : (trade.currency === 'THB' ? 1.0 : "");
+  }
   
   function getColLetter(colIdx) {
     if (colIdx === -1) return "";
@@ -1729,3 +1862,162 @@ function revertRebalance(rebalanceId) {
   lock.releaseLock();
   return { success: true };
 }
+
+// ==========================================
+// Cash Ledger Functions (Step 5 Accounting)
+// ==========================================
+
+function addCashEntry(entry) {
+  var lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(15000);
+  } catch (e) {
+    return { success: false, error: "System is busy. Please try again in a few seconds." };
+  }
+  
+  try {
+    ensureTableStructure();
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheet = ss.getSheetByName("Cash_Ledger");
+    if (!sheet) {
+      throw new Error("Cash_Ledger sheet not found");
+    }
+    
+    var entryId = nextId("CL");
+    var gross = parseFloat(entry.gross) || 0;
+    var wht = parseFloat(entry.withholdingTax) || 0;
+    var net = (entry.net !== undefined && entry.net !== null && entry.net !== "") ? parseFloat(entry.net) : (gross - wht);
+    var fxToThb = parseFloat(entry.fxToThb) || (entry.currency === "THB" ? 1.0 : 1.0);
+    
+    var rowValues = [
+      entryId,
+      entry.date ? new Date(entry.date) : new Date(),
+      entry.portfolio || "Main Trading",
+      entry.kind || "Deposit",
+      (entry.asset || "").toString().trim().toUpperCase(),
+      entry.currency || "THB",
+      gross,
+      wht,
+      net,
+      fxToThb,
+      (entry.note || "").toString().trim(),
+      new Date().toISOString()
+    ];
+    
+    sheet.appendRow(rowValues);
+    return { success: true, entryId: entryId };
+  } catch (err) {
+    return { success: false, error: err.toString() };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function editCashEntry(entry) {
+  var lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(15000);
+  } catch (e) {
+    return { success: false, error: "System is busy. Please try again in a few seconds." };
+  }
+  
+  try {
+    ensureTableStructure();
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheet = ss.getSheetByName("Cash_Ledger");
+    if (!sheet) throw new Error("Cash_Ledger sheet not found");
+    
+    var targetId = String(entry.entryId || "").trim();
+    if (!targetId) throw new Error("Missing entryId");
+    
+    var data = sheet.getDataRange().getValues();
+    var headers = data[0].map(function(h) { return h.toString().toLowerCase().trim(); });
+    var idColIdx = headers.indexOf("entry id");
+    if (idColIdx === -1) throw new Error("Entry ID column not found");
+    
+    var targetRowIdx = -1;
+    for (var r = 1; r < data.length; r++) {
+      if (String(data[r][idColIdx]).trim() === targetId) {
+        targetRowIdx = r + 1;
+        break;
+      }
+    }
+    
+    if (targetRowIdx === -1) {
+      throw new Error("Cash entry " + targetId + " not found");
+    }
+    
+    function setColVal(key, val) {
+      var col = headers.indexOf(key.toLowerCase());
+      if (col !== -1) {
+        sheet.getRange(targetRowIdx, col + 1).setValue(val);
+      }
+    }
+    
+    if (entry.date) setColVal("entry date", new Date(entry.date));
+    if (entry.portfolio) setColVal("portfolio", entry.portfolio);
+    if (entry.kind) setColVal("kind", entry.kind);
+    if (entry.asset !== undefined) setColVal("asset", String(entry.asset).toUpperCase().trim());
+    if (entry.currency) setColVal("currency", entry.currency);
+    if (entry.gross !== undefined) setColVal("gross", parseFloat(entry.gross) || 0);
+    if (entry.withholdingTax !== undefined) setColVal("withholding tax", parseFloat(entry.withholdingTax) || 0);
+    
+    var gross = entry.gross !== undefined ? parseFloat(entry.gross) || 0 : null;
+    var wht = entry.withholdingTax !== undefined ? parseFloat(entry.withholdingTax) || 0 : null;
+    var net = entry.net !== undefined ? parseFloat(entry.net) || 0 : (gross !== null && wht !== null ? gross - wht : null);
+    if (net !== null) setColVal("net", net);
+    
+    if (entry.fxToThb !== undefined) setColVal("fx to thb", parseFloat(entry.fxToThb) || 1.0);
+    if (entry.note !== undefined) setColVal("note", String(entry.note).trim());
+    
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err.toString() };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function deleteCashEntry(entryId) {
+  var lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(15000);
+  } catch (e) {
+    return { success: false, error: "System is busy. Please try again in a few seconds." };
+  }
+  
+  try {
+    ensureTableStructure();
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheet = ss.getSheetByName("Cash_Ledger");
+    if (!sheet) throw new Error("Cash_Ledger sheet not found");
+    
+    var targetId = String(entryId || "").trim();
+    if (!targetId) throw new Error("Missing entryId");
+    
+    var data = sheet.getDataRange().getValues();
+    var headers = data[0].map(function(h) { return h.toString().toLowerCase().trim(); });
+    var idColIdx = headers.indexOf("entry id");
+    if (idColIdx === -1) throw new Error("Entry ID column not found");
+    
+    var targetRowIdx = -1;
+    for (var r = 1; r < data.length; r++) {
+      if (String(data[r][idColIdx]).trim() === targetId) {
+        targetRowIdx = r + 1;
+        break;
+      }
+    }
+    
+    if (targetRowIdx === -1) {
+      throw new Error("Cash entry " + targetId + " not found");
+    }
+    
+    sheet.deleteRow(targetRowIdx);
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err.toString() };
+  } finally {
+    lock.releaseLock();
+  }
+}
+

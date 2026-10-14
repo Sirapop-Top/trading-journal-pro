@@ -7,6 +7,8 @@ import { usePasscodeLock } from '../hooks/usePasscodeLock.js';
 import { usePortfolioActions } from '../hooks/usePortfolioActions.js';
 import { useTradeActions } from '../hooks/useTradeActions.js';
 import { useRebalanceActions } from '../hooks/useRebalanceActions.js';
+import { useCashActions } from '../hooks/useCashActions.js';
+import { computeCashLedgerStatement, computeCashKpis, calculateDefaultWht } from '../lib/cashEngine.js';
 
 const AppDataContext = createContext(null);
 
@@ -44,6 +46,7 @@ export const AppDataProvider = ({ children }) => {
     livePrices: journal.livePrices,
     liveRates: journal.liveRates,
     displayCurrency: journal.displayCurrency,
+    cashEntries: journal.cashLedger,
     journalActionFilter,
     journalAssetTypeFilter,
     journalSearch,
@@ -118,6 +121,29 @@ export const AppDataProvider = ({ children }) => {
     fetchData: journal.fetchData
   });
 
+  // Cash actions (Step 5 Accounting)
+  const cashActions = useCashActions({ journal });
+
+  // Cash KPIs and Statement
+  const cashKpis = computeCashKpis({
+    portfolio: journal.activePortfolio,
+    cashEntries: journal.cashLedger,
+    trades: journal.trades,
+    liveRates: journal.liveRates,
+    displayCurrency: journal.displayCurrency,
+    realizedPnLConverted: derived.kpis.totalRealizedPnLConverted,
+    unrealizedPnLConverted: derived.kpis.totalUnrealizedPnLConverted,
+    fallbackCashOnHand: derived.portfolioSizing.cashOnHand
+  });
+
+  const cashStatement = computeCashLedgerStatement({
+    portfolio: journal.activePortfolio,
+    cashEntries: journal.cashLedger,
+    trades: journal.trades,
+    liveRates: journal.liveRates,
+    displayCurrency: journal.displayCurrency
+  });
+
   const value = {
     // Navigation
     activeTab,
@@ -150,6 +176,11 @@ export const AppDataProvider = ({ children }) => {
     ...derived,
     ...responsive,
     ...passcode,
+
+    // Cash Ledger (Step 5)
+    cashKpis,
+    cashStatement,
+    calculateDefaultWht,
 
     // Modals & Forms
     isTradeModalOpen,
@@ -185,7 +216,8 @@ export const AppDataProvider = ({ children }) => {
     // Actions & Handlers
     ...portfolioActions,
     ...tradeActions,
-    ...rebalanceActions
+    ...rebalanceActions,
+    ...cashActions
   };
 
   return (

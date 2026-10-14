@@ -4,6 +4,7 @@ import {
   BookOutlined,
   TableOutlined,
   SwapOutlined,
+  WalletOutlined,
   SettingOutlined
 } from '@ant-design/icons';
 import { useAppData } from '../../context/AppDataContext.jsx';
@@ -54,6 +55,7 @@ export const AppSider = () => {
         <Menu.Item key="rebalance" icon={<SwapOutlined />}>
           Rebalance {dueCount > 0 && <Tag color="error" style={{ marginLeft: 6, fontSize: 10, padding: '0 4px', lineHeight: '16px' }}>{dueCount}</Tag>}
         </Menu.Item>
+        <Menu.Item key="cash" icon={<WalletOutlined />}>Cash & Income</Menu.Item>
         <Menu.Item key="settings" icon={<SettingOutlined />}>Terminal Settings</Menu.Item>
       </Menu>
 

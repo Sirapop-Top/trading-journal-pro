@@ -4,7 +4,8 @@ import {
   GlobalOutlined,
   DollarOutlined,
   PieChartOutlined,
-  AlertOutlined
+  AlertOutlined,
+  InfoCircleOutlined
 } from '@ant-design/icons';
 import { useAppData } from '../../context/AppDataContext.jsx';
 import { MobileCharts } from './MobileCharts.jsx';
@@ -21,7 +22,8 @@ export const MobileDashboard = () => {
     isCensored,
     positions,
     dueCount,
-    setActiveTab
+    setActiveTab,
+    cashKpis
   } = useAppData();
 
   const netAssetValue = (portfolioSizing?.cashOnHand || 0) + (kpis?.currentMarketValueConverted || 0);
@@ -44,6 +46,20 @@ export const MobileDashboard = () => {
           }
           type="error"
           style={{ background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.3)', padding: '6px 12px' }}
+        />
+      )}
+      {!cashKpis?.hasDeposit && (
+        <Alert
+          message={
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+              <span style={{ fontSize: '12px' }}><InfoCircleOutlined /> No Opening Deposit recorded</span>
+              <Button type="primary" size="small" onClick={() => setActiveTab('cash')} style={{ background: 'var(--primary-color)', color: '#06080f', borderColor: 'var(--primary-color)', fontSize: '11px', height: '24px', fontWeight: 600 }}>
+                Cash &rarr;
+              </Button>
+            </div>
+          }
+          type="info"
+          style={{ background: 'rgba(0, 242, 254, 0.08)', border: '1px solid rgba(0, 242, 254, 0.25)', padding: '6px 12px' }}
         />
       )}
       {/* Mobile Account Summary (NAV Hero) */}

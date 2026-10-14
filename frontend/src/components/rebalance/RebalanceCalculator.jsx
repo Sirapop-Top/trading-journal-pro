@@ -35,6 +35,7 @@ export const RebalanceCalculator = ({
   livePrices = {},
   liveRates = {},
   displayCurrency = 'THB',
+  cashOnHand = null,
   onClose,
   onExecute,
   loading = false
@@ -219,6 +220,14 @@ export const RebalanceCalculator = ({
                 </div>
               </div>
             </div>
+            {typeof cashOnHand === 'number' && (
+              <div style={{ marginTop: 10, paddingTop: 8, borderTop: '1px dashed rgba(56, 189, 248, 0.2)', display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
+                <span style={{ color: 'var(--text-secondary)' }}>Portfolio Cash on Hand:</span>
+                <span style={{ fontWeight: 600, color: '#38bdf8', fontFamily: 'var(--font-family-mono)' }}>
+                  {formatCurrency(cashOnHand, displayCurrency)}
+                </span>
+              </div>
+            )}
           </div>
 
           {/* Warnings */}

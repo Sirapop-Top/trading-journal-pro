@@ -11,7 +11,8 @@ export const KpiCards = () => {
   const {
     kpis,
     portfolioSizing,
-    formatCurrency
+    formatCurrency,
+    cashKpis
   } = useAppData();
 
   const netAssetValue = (portfolioSizing?.cashOnHand || 0) + (kpis?.currentMarketValueConverted || 0);
@@ -97,9 +98,9 @@ export const KpiCards = () => {
             </div>
           </div>
 
-          <div style={{ marginTop: '20px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', paddingTop: '16px', borderTop: '1px solid rgba(255,255,255,0.04)' }}>
+          <div style={{ marginTop: '20px', display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px', paddingTop: '16px', borderTop: '1px solid rgba(255,255,255,0.04)' }}>
             <div>
-              <span style={{ fontSize: '10px', color: 'var(--text-secondary)', textTransform: 'uppercase', display: 'block', fontWeight: 600 }}>Realized P&L</span>
+              <span style={{ fontSize: '10px', color: 'var(--text-secondary)', textTransform: 'uppercase', display: 'block', fontWeight: 600 }}>Realized</span>
               <span style={{ fontSize: '14px', fontWeight: 700, color: (kpis?.totalRealizedPnLConverted || 0) >= 0 ? 'var(--success-color)' : 'var(--danger-color)', fontFamily: 'var(--font-family-mono)' }}>
                 {(kpis?.totalRealizedPnLConverted || 0) >= 0 ? '+' : ''}{formatCurrency(kpis?.totalRealizedPnLConverted)}
               </span>
@@ -108,6 +109,12 @@ export const KpiCards = () => {
               <span style={{ fontSize: '10px', color: 'var(--text-secondary)', textTransform: 'uppercase', display: 'block', fontWeight: 600 }}>Paper P&L</span>
               <span style={{ fontSize: '14px', fontWeight: 700, color: (kpis?.totalUnrealizedPnLConverted || 0) >= 0 ? 'var(--success-color)' : 'var(--danger-color)', fontFamily: 'var(--font-family-mono)' }}>
                 {(kpis?.totalUnrealizedPnLConverted || 0) >= 0 ? '+' : ''}{formatCurrency(kpis?.totalUnrealizedPnLConverted)}
+              </span>
+            </div>
+            <div>
+              <span style={{ fontSize: '10px', color: 'var(--text-secondary)', textTransform: 'uppercase', display: 'block', fontWeight: 600 }}>Dividends</span>
+              <span style={{ fontSize: '14px', fontWeight: 700, color: '#00f2fe', fontFamily: 'var(--font-family-mono)' }}>
+                +{formatCurrency(cashKpis?.totalDividendsEver || 0)}
               </span>
             </div>
           </div>
