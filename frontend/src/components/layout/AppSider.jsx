@@ -3,6 +3,7 @@ import {
   DashboardOutlined,
   BookOutlined,
   TableOutlined,
+  SwapOutlined,
   SettingOutlined
 } from '@ant-design/icons';
 import { useAppData } from '../../context/AppDataContext.jsx';
@@ -17,6 +18,7 @@ export const AppSider = () => {
     setSiderCollapsed,
     activeTab,
     setActiveTab,
+    dueCount,
     liveRates
   } = useAppData();
 
@@ -49,6 +51,9 @@ export const AppSider = () => {
         <Menu.Item key="dashboard" icon={<DashboardOutlined />}>Dashboard</Menu.Item>
         <Menu.Item key="journal" icon={<BookOutlined />}>Trading Journal</Menu.Item>
         <Menu.Item key="positions" icon={<TableOutlined />}>Active Positions</Menu.Item>
+        <Menu.Item key="rebalance" icon={<SwapOutlined />}>
+          Rebalance {dueCount > 0 && <Tag color="error" style={{ marginLeft: 6, fontSize: 10, padding: '0 4px', lineHeight: '16px' }}>{dueCount}</Tag>}
+        </Menu.Item>
         <Menu.Item key="settings" icon={<SettingOutlined />}>Terminal Settings</Menu.Item>
       </Menu>
 

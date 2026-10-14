@@ -6,6 +6,7 @@ import { useResponsive } from '../hooks/useResponsive.js';
 import { usePasscodeLock } from '../hooks/usePasscodeLock.js';
 import { usePortfolioActions } from '../hooks/usePortfolioActions.js';
 import { useTradeActions } from '../hooks/useTradeActions.js';
+import { useRebalanceActions } from '../hooks/useRebalanceActions.js';
 
 const AppDataContext = createContext(null);
 
@@ -105,6 +106,18 @@ export const AppDataProvider = ({ children }) => {
     setTickerValidation
   });
 
+  // Rebalance actions & calculations
+  const rebalanceActions = useRebalanceActions({
+    trades: journal.trades,
+    rebalancePairs: journal.rebalancePairs,
+    setRebalancePairs: journal.setRebalancePairs,
+    rebalanceLog: journal.rebalanceLog,
+    setRebalanceLog: journal.setRebalanceLog,
+    livePrices: journal.livePrices,
+    liveRates: journal.liveRates,
+    fetchData: journal.fetchData
+  });
+
   const value = {
     // Navigation
     activeTab,
@@ -171,7 +184,8 @@ export const AppDataProvider = ({ children }) => {
 
     // Actions & Handlers
     ...portfolioActions,
-    ...tradeActions
+    ...tradeActions,
+    ...rebalanceActions
   };
 
   return (

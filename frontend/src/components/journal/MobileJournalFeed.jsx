@@ -18,7 +18,8 @@ export const MobileJournalFeed = () => {
     setIsEditStrategyModalOpen,
     transferForm,
     setIsTransferModalOpen,
-    handleDeleteTrade
+    handleDeleteTrade,
+    handleRevertRebalance
   } = useAppData();
 
   const handleEditClick = (record) => {
@@ -81,6 +82,11 @@ export const MobileJournalFeed = () => {
                   <span className={`pill ${isBuy ? 'pill-buy' : 'pill-sell'}`} style={{ fontSize: '9px', padding: '2px 6px' }}>
                     {trade.action.toUpperCase()}
                   </span>
+                  {trade.rebalanceId && (
+                    <Tag color="blue" style={{ fontSize: '9px', margin: 0 }}>
+                      {trade.rebalanceId}
+                    </Tag>
+                  )}
                   <Tag color="geekblue" style={{ fontSize: '9px', margin: 0 }}>
                     {trade.portfolio}
                   </Tag>
@@ -164,10 +170,14 @@ export const MobileJournalFeed = () => {
                     style={{ padding: 0 }}
                   />
                   <Popconfirm
-                    title="Delete Trade"
-                    description="Are you sure you want to delete this trade?"
-                    onConfirm={() => handleDeleteTrade(trade.id)}
-                    okText="Delete"
+                    title={trade.rebalanceId ? "Revert Entire Rebalance" : "Delete Trade"}
+                    description={
+                      trade.rebalanceId
+                        ? `This trade is part of Rebalance ${trade.rebalanceId}. Reverting will remove BOTH the buy and sell trades. Proceed?`
+                        : "Are you sure you want to delete this trade?"
+                    }
+                    onConfirm={() => trade.rebalanceId ? handleRevertRebalance(trade.rebalanceId) : handleDeleteTrade(trade.id)}
+                    okText={trade.rebalanceId ? "Revert Rebalance" : "Delete"}
                     cancelText="Cancel"
                     okButtonProps={{ danger: true }}
                   >

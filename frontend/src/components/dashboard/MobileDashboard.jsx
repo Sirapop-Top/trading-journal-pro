@@ -1,9 +1,10 @@
-import { Space, Card, Row, Col, Typography, Tag } from 'antd';
+import { Space, Card, Row, Col, Typography, Tag, Alert, Button } from 'antd';
 import {
   RiseOutlined,
   GlobalOutlined,
   DollarOutlined,
-  PieChartOutlined
+  PieChartOutlined,
+  AlertOutlined
 } from '@ant-design/icons';
 import { useAppData } from '../../context/AppDataContext.jsx';
 import { MobileCharts } from './MobileCharts.jsx';
@@ -18,7 +19,9 @@ export const MobileDashboard = () => {
     mobileChartTab,
     setMobileChartTab,
     isCensored,
-    positions
+    positions,
+    dueCount,
+    setActiveTab
   } = useAppData();
 
   const netAssetValue = (portfolioSizing?.cashOnHand || 0) + (kpis?.currentMarketValueConverted || 0);
@@ -29,6 +32,20 @@ export const MobileDashboard = () => {
 
   return (
     <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+      {dueCount > 0 && (
+        <Alert
+          message={
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span><AlertOutlined /> <strong>{dueCount}</strong> pair(s) need rebalancing</span>
+              <Button type="primary" size="small" onClick={() => setActiveTab('rebalance')} style={{ background: '#ef4444', borderColor: '#ef4444', fontSize: '11px', height: '24px' }}>
+                Fix &rarr;
+              </Button>
+            </div>
+          }
+          type="error"
+          style={{ background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.3)', padding: '6px 12px' }}
+        />
+      )}
       {/* Mobile Account Summary (NAV Hero) */}
       <Card bordered={false} className="glass-panel glow-card-cyan" styles={{ body: { padding: '16px' } }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>

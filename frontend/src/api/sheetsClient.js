@@ -35,15 +35,28 @@ export const callGoogleAppsScript = async (url, payload = null) => {
 
 /**
  * Fetch a Google Sheet tab directly as CSV using the Google Visualization API.
+ * If the tab does not exist yet (e.g. newly introduced Rebalance tabs), returns empty array.
  */
 export const fetchSheetCsv = async (sheetId, tabName = 'Journal') => {
   const csvUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(tabName)}`;
-  const response = await fetch(csvUrl);
-  if (!response.ok) {
-    throw new Error(`Google Sheets responded with HTTP status ${response.status}`);
+  try {
+    const response = await fetch(csvUrl);
+    if (!response.ok) {
+      if (tabName !== 'Journal') {
+        return [];
+      }
+      throw new Error(`Google Sheets responded with HTTP status ${response.status}`);
+    }
+    const csvText = await response.text();
+    // gviz returns HTML error response if sheet tab not found
+    if (csvText.includes('<!DOCTYPE html>') || csvText.includes('google.visualization.Query.setResponse')) {
+      if (tabName !== 'Journal') return [];
+    }
+    return parseCSV(csvText);
+  } catch (err) {
+    if (tabName !== 'Journal') return [];
+    throw err;
   }
-  const csvText = await response.text();
-  return parseCSV(csvText);
 };
 
 /**
@@ -143,4 +156,27 @@ export const renamePortfolioApi = async (scriptUrl, oldName, newName) => {
  */
 export const updateTradePortfolioApi = async (scriptUrl, tradeId, portfolio) => {
   return await postAction(scriptUrl, 'updateTradePortfolio', { tradeId, portfolio });
+};
+
+/**
+ * Rebalance endpoints
+ */
+export const savePairApi = async (scriptUrl, pair) => {
+  return await postAction(scriptUrl, 'savePair', { pair });
+};
+
+export const setPairStatusApi = async (scriptUrl, pairId, status) => {
+  return await postAction(scriptUrl, 'setPairStatus', { pairId, status });
+};
+
+export const deletePairApi = async (scriptUrl, pairId) => {
+  return await postAction(scriptUrl, 'deletePair', { pairId });
+};
+
+export const executeRebalanceApi = async (scriptUrl, rebalance) => {
+  return await postAction(scriptUrl, 'executeRebalance', { rebalance });
+};
+
+export const revertRebalanceApi = async (scriptUrl, rebalanceId) => {
+  return await postAction(scriptUrl, 'revertRebalance', { rebalanceId });
 };

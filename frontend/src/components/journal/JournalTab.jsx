@@ -43,7 +43,8 @@ export const JournalTab = () => {
     setIsEditStrategyModalOpen,
     transferForm,
     setIsTransferModalOpen,
-    handleDeleteTrade
+    handleDeleteTrade,
+    handleRevertRebalance
   } = useAppData();
 
   const openLogTrade = () => {
@@ -120,11 +121,18 @@ export const JournalTab = () => {
       dataIndex: 'action',
       key: 'action',
       align: 'center',
-      width: 90,
-      render: (action) => (
-        <span className={`pill ${action.toLowerCase() === 'buy' ? 'pill-buy' : 'pill-sell'}`}>
-          {action.toUpperCase()}
-        </span>
+      width: 100,
+      render: (action, record) => (
+        <Space direction="vertical" size={2} style={{ alignItems: 'center' }}>
+          <span className={`pill ${action.toLowerCase() === 'buy' ? 'pill-buy' : 'pill-sell'}`}>
+            {action.toUpperCase()}
+          </span>
+          {record.rebalanceId && (
+            <Tag color="blue" style={{ margin: 0, fontSize: 10, padding: '0 4px', lineHeight: '16px' }}>
+              {record.rebalanceId}
+            </Tag>
+          )}
+        </Space>
       )
     },
     {
@@ -250,10 +258,14 @@ export const JournalTab = () => {
             onClick={() => handleTransferClick(record)}
           />
           <Popconfirm
-            title="Delete Trade"
-            description="Are you sure you want to delete this trade from your journal? This will rewrite the spreadsheet."
-            onConfirm={() => handleDeleteTrade(record.id)}
-            okText="Delete"
+            title={record.rebalanceId ? "Revert Entire Rebalance" : "Delete Trade"}
+            description={
+              record.rebalanceId
+                ? `This trade is part of Rebalance ${record.rebalanceId}. Reverting will remove BOTH the buy and sell trades. Proceed?`
+                : "Are you sure you want to delete this trade from your journal? This will rewrite the spreadsheet."
+            }
+            onConfirm={() => record.rebalanceId ? handleRevertRebalance(record.rebalanceId) : handleDeleteTrade(record.id)}
+            okText={record.rebalanceId ? "Revert Rebalance" : "Delete"}
             cancelText="Cancel"
             okButtonProps={{ danger: true }}
           >
@@ -308,6 +320,7 @@ export const JournalTab = () => {
                 <Option value="All">All Actions</Option>
                 <Option value="Buy">Buys</Option>
                 <Option value="Sell">Sells</Option>
+                <Option value="Rebalance">Rebalance</Option>
               </Select>
               <Select
                 value={journalAssetTypeFilter}
@@ -378,6 +391,7 @@ export const JournalTab = () => {
             <Option value="All">All Actions</Option>
             <Option value="Buy">Buys</Option>
             <Option value="Sell">Sells</Option>
+            <Option value="Rebalance">Rebalance</Option>
           </Select>
         </div>
         <div>

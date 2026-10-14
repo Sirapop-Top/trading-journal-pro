@@ -8,6 +8,7 @@ import { MobileTabBar } from './components/layout/MobileTabBar.jsx';
 import { DashboardTab } from './components/dashboard/DashboardTab.jsx';
 import { JournalTab } from './components/journal/JournalTab.jsx';
 import { PositionsTab } from './components/positions/PositionsTab.jsx';
+import { RebalanceTab } from './components/rebalance/RebalanceTab.jsx';
 import { SettingsTab } from './components/settings/SettingsTab.jsx';
 import { LogTradeModal } from './components/modals/LogTradeModal.jsx';
 import { EditStrategyModal } from './components/modals/EditStrategyModal.jsx';
@@ -90,6 +91,7 @@ const AppContent = () => {
             {activeTab === 'dashboard' && <DashboardTab />}
             {activeTab === 'journal' && <JournalTab />}
             {activeTab === 'positions' && <PositionsTab />}
+            {activeTab === 'rebalance' && <RebalanceTab />}
             {activeTab === 'settings' && <SettingsTab />}
           </Spin>
         </Content>

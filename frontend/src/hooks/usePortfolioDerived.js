@@ -51,7 +51,11 @@ export const usePortfolioDerived = ({
 
     // Filter by Action
     if (journalActionFilter !== 'All') {
-      result = result.filter(t => t.action.toLowerCase() === journalActionFilter.toLowerCase());
+      if (journalActionFilter === 'Rebalance') {
+        result = result.filter(t => !!t.rebalanceId);
+      } else {
+        result = result.filter(t => t.action.toLowerCase() === journalActionFilter.toLowerCase());
+      }
     }
 
     // Filter by Asset Type

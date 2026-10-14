@@ -1,5 +1,12 @@
-﻿function doGet(e) {
-  var action = e.parameter.action;
+// ==========================================
+// AlphaTrader — Google Apps Script Backend
+// Schema Version: 2.0 (Rebalance & Multi-Asset Support)
+// ==========================================
+
+var SCHEMA_VERSION = "2.0";
+
+function doGet(e) {
+  var action = e ? e.parameter.action : "";
   
   if (action === "getData") {
     return ContentService.createTextOutput(JSON.stringify(getDashboardData()))
@@ -48,6 +55,21 @@ function doPost(e) {
     } else if (action === "updatePortfolioConfig") {
       return ContentService.createTextOutput(JSON.stringify(updatePortfolioConfig(contents.name, contents.initialCapital, contents.targetStocks)))
         .setMimeType(ContentService.MimeType.JSON);
+    } else if (action === "savePair") {
+      return ContentService.createTextOutput(JSON.stringify(savePair(contents.pair)))
+        .setMimeType(ContentService.MimeType.JSON);
+    } else if (action === "setPairStatus") {
+      return ContentService.createTextOutput(JSON.stringify(setPairStatus(contents.pairId, contents.status)))
+        .setMimeType(ContentService.MimeType.JSON);
+    } else if (action === "deletePair") {
+      return ContentService.createTextOutput(JSON.stringify(deletePair(contents.pairId)))
+        .setMimeType(ContentService.MimeType.JSON);
+    } else if (action === "executeRebalance") {
+      return ContentService.createTextOutput(JSON.stringify(executeRebalance(contents.rebalance)))
+        .setMimeType(ContentService.MimeType.JSON);
+    } else if (action === "revertRebalance") {
+      return ContentService.createTextOutput(JSON.stringify(revertRebalance(contents.rebalanceId)))
+        .setMimeType(ContentService.MimeType.JSON);
     }
     
     // Fallback for legacy direct uploads
@@ -64,16 +86,35 @@ var JOURNAL_HEADERS = [
   "Timestamp", "Date", "Asset Name", "Asset Type", "Currency", 
   "Action", "Quantity", "Price/Unit", "Amount", "Current Price", 
   "Current Value", "P&L", "P&L %", "Why (Decision Reason)", 
-  "Remark", "Portfolio", "Fee Amount"
+  "Remark", "Portfolio", "Fee Amount", "Rebalance ID"
 ];
 
 var PORTFOLIOS_HEADERS = [
   "Asset Name", "Portfolio", "Portfolio Names", "Initial Capital", "Target Stocks"
 ];
 
-// Self-healing database structure initialization
+var REBALANCE_PAIRS_HEADERS = [
+  "Pair ID", "Portfolio", "Pair Name", "Asset A", "Asset A Type", "Asset A Currency", 
+  "Target A %", "Asset B", "Asset B Type", "Asset B Currency", "Target B %", 
+  "Trigger Mode", "Drift Threshold %", "Schedule Frequency", "Schedule Anchor", 
+  "Last Rebalanced", "Custom Fee", "Fee A Mode", "Fee A Value", "Fee B Mode", "Fee B Value", 
+  "Status", "Created", "Notes"
+];
+
+var REBALANCE_LOG_HEADERS = [
+  "Rebalance ID", "Pair ID", "Portfolio", "Executed On", "Trigger", 
+  "Sell Asset", "Sell Qty", "Sell Price", "Sell Fee", 
+  "Buy Asset", "Buy Qty", "Buy Price", "Buy Fee", 
+  "Value Moved THB", "Before A %", "Target A %", "After A %", 
+  "Realized PnL THB", "Reason", "Status", "Created"
+];
+
+// Self-healing database structure initialization with SCHEMA_VERSION check
 function ensureTableStructure() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var props = PropertiesService.getScriptProperties();
+  var currentVersion = props.getProperty("SCHEMA_VERSION");
+  var needsHeavyMigration = (currentVersion !== SCHEMA_VERSION);
   
   // 1. Repair or create Journal sheet
   var journalSheet = ss.getSheetByName("Journal");
@@ -99,40 +140,54 @@ function ensureTableStructure() {
         var hLower = h.toLowerCase();
         var cleanH = h;
         
-        if (hLower.indexOf("timestamp") !== -1) {
-          cleanH = "Timestamp";
-        } else if (hLower.indexOf("date") !== -1) {
-          cleanH = "Date";
-        } else if (hLower.indexOf("asset name") !== -1 || hLower.indexOf("asset_name") !== -1) {
-          cleanH = "Asset Name";
-        } else if (hLower.indexOf("asset type") !== -1 || hLower.indexOf("asset_type") !== -1) {
-          cleanH = "Asset Type";
-        } else if (hLower.indexOf("currency") !== -1) {
-          cleanH = "Currency";
-        } else if (hLower.indexOf("action") !== -1) {
-          cleanH = "Action";
-        } else if (hLower.indexOf("quantity") !== -1 || hLower.indexOf("qty") !== -1) {
-          cleanH = "Quantity";
-        } else if (hLower.indexOf("price/unit") !== -1 || hLower.indexOf("price_unit") !== -1 || hLower.indexOf("price unit") !== -1) {
-          cleanH = "Price/Unit";
-        } else if (hLower.indexOf("portfolio") !== -1 || hLower.indexOf("port") !== -1) {
-          cleanH = "Portfolio";
-        } else if (hLower.indexOf("fee") !== -1) {
-          cleanH = "Fee Amount";
-        } else if (hLower.indexOf("amount") !== -1) {
-          cleanH = "Amount";
-        } else if (hLower.indexOf("current price") !== -1) {
-          cleanH = "Current Price";
-        } else if (hLower.indexOf("current value") !== -1) {
-          cleanH = "Current Value";
-        } else if (hLower.indexOf("p&l %") !== -1) {
-          cleanH = "P&L %";
-        } else if (hLower.indexOf("p&l") !== -1) {
-          cleanH = "P&L";
-        } else if (hLower.indexOf("why") !== -1 || hLower.indexOf("decision") !== -1 || hLower.indexOf("reason") !== -1) {
-          cleanH = "Why (Decision Reason)";
-        } else if (hLower.indexOf("remark") !== -1 || hLower.indexOf("note") !== -1) {
-          cleanH = "Remark";
+        // Exact match check first (Trap T2 prevention)
+        var exactMatch = false;
+        for (var j = 0; j < JOURNAL_HEADERS.length; j++) {
+          if (hLower === JOURNAL_HEADERS[j].toLowerCase()) {
+            cleanH = JOURNAL_HEADERS[j];
+            exactMatch = true;
+            break;
+          }
+        }
+        
+        if (!exactMatch) {
+          if (hLower.indexOf("rebalance") !== -1) {
+            cleanH = "Rebalance ID";
+          } else if (hLower.indexOf("timestamp") !== -1) {
+            cleanH = "Timestamp";
+          } else if (hLower.indexOf("date") !== -1) {
+            cleanH = "Date";
+          } else if (hLower.indexOf("asset name") !== -1 || hLower.indexOf("asset_name") !== -1) {
+            cleanH = "Asset Name";
+          } else if (hLower.indexOf("asset type") !== -1 || hLower.indexOf("asset_type") !== -1) {
+            cleanH = "Asset Type";
+          } else if (hLower.indexOf("currency") !== -1) {
+            cleanH = "Currency";
+          } else if (hLower.indexOf("action") !== -1) {
+            cleanH = "Action";
+          } else if (hLower.indexOf("quantity") !== -1 || hLower.indexOf("qty") !== -1) {
+            cleanH = "Quantity";
+          } else if (hLower.indexOf("price/unit") !== -1 || hLower.indexOf("price_unit") !== -1 || hLower.indexOf("price unit") !== -1) {
+            cleanH = "Price/Unit";
+          } else if (hLower.indexOf("portfolio") !== -1 || hLower.indexOf("port") !== -1) {
+            cleanH = "Portfolio";
+          } else if (hLower.indexOf("fee") !== -1) {
+            cleanH = "Fee Amount";
+          } else if (hLower.indexOf("amount") !== -1) {
+            cleanH = "Amount";
+          } else if (hLower.indexOf("current price") !== -1) {
+            cleanH = "Current Price";
+          } else if (hLower.indexOf("current value") !== -1) {
+            cleanH = "Current Value";
+          } else if (hLower.indexOf("p&l %") !== -1) {
+            cleanH = "P&L %";
+          } else if (hLower.indexOf("p&l") !== -1) {
+            cleanH = "P&L";
+          } else if (hLower.indexOf("why") !== -1 || hLower.indexOf("decision") !== -1 || hLower.indexOf("reason") !== -1) {
+            cleanH = "Why (Decision Reason)";
+          } else if (hLower.indexOf("remark") !== -1 || hLower.indexOf("note") !== -1) {
+            cleanH = "Remark";
+          }
         }
         
         if (cleanH !== h) changed = true;
@@ -158,118 +213,106 @@ function ensureTableStructure() {
         journalSheet.getRange(1, lastCol + 1, 1, missingHeaders.length).setFontWeight("bold");
       }
       
-      // Self-heal: Clean up duplicate "Amount" columns from Q to AG, and restore "Fee Amount" back to column Q (index 17)
+      // Self-heal: Clean up redundant duplicate columns beyond JOURNAL_HEADERS.length (Trap T1 prevention)
       var maxCol = journalSheet.getLastColumn();
-      if (maxCol > 17) {
-        var rawHeaders = journalSheet.getRange(1, 1, 1, maxCol).getValues()[0];
-        var feeColIdx = -1;
-        for (var i = 17; i < rawHeaders.length; i++) {
-          if (rawHeaders[i].toString().toLowerCase().trim().indexOf("fee") !== -1) {
-            feeColIdx = i;
-            break;
-          }
-        }
-        if (feeColIdx !== -1) {
-          var lastRow = journalSheet.getLastRow();
-          if (lastRow >= 1) {
-            var feeValues = journalSheet.getRange(1, feeColIdx + 1, lastRow, 1).getValues();
-            journalSheet.getRange(1, 17, lastRow, 1).setValues(feeValues);
-          }
-        }
-        journalSheet.getRange(1, 17).setValue("Fee Amount");
-        var colsToDelete = maxCol - 17;
+      if (maxCol > JOURNAL_HEADERS.length) {
+        var rawPostHeaders = journalSheet.getRange(1, 1, 1, maxCol).getValues()[0];
+        // Only delete columns that are beyond the schema and not recognized
+        var colsToDelete = maxCol - JOURNAL_HEADERS.length;
         if (colsToDelete > 0) {
-          journalSheet.deleteColumns(18, colsToDelete);
+          journalSheet.deleteColumns(JOURNAL_HEADERS.length + 1, colsToDelete);
         }
       }
       
-      // Batch formula update logic to rewrite/repair all existing rows' formulas
-      var lastRow = journalSheet.getLastRow();
-      if (lastRow >= 2) {
-        var finalHeaders = journalSheet.getRange(1, 1, 1, journalSheet.getLastColumn()).getValues()[0];
-        var finalHeadersLower = finalHeaders.map(function(h) { return h.toString().toLowerCase().trim(); });
-        
-        function getColLetter(colIdx) {
-          if (colIdx === -1) return "";
-          var temp = colIdx + 1;
-          var letter = "";
-          while (temp > 0) {
-            var mod = (temp - 1) % 26;
-            letter = String.fromCharCode(65 + mod) + letter;
-            temp = Math.floor((temp - mod - 1) / 26);
-          }
-          return letter;
-        }
-        
-        var qtyIdx = finalHeadersLower.indexOf("quantity");
-        if (qtyIdx === -1) qtyIdx = finalHeadersLower.indexOf("qty");
-        var priceIdx = finalHeadersLower.indexOf("price/unit");
-        if (priceIdx === -1) priceIdx = finalHeadersLower.indexOf("price_unit");
-        if (priceIdx === -1) priceIdx = finalHeadersLower.indexOf("price");
-        var actIdx = finalHeadersLower.indexOf("action");
-        var cPriceIdx = finalHeadersLower.indexOf("current price");
-        var cValIdx = finalHeadersLower.indexOf("current value");
-        var amtIdx = finalHeadersLower.indexOf("amount");
-        var plIdx = finalHeadersLower.indexOf("p&l");
-        var plPctIdx = finalHeadersLower.indexOf("p&l %");
-        var fAmtIdx = finalHeadersLower.indexOf("fee amount");
-        if (fAmtIdx === -1) fAmtIdx = finalHeadersLower.indexOf("fee");
-        
-        var qtyL = getColLetter(qtyIdx);
-        var priceL = getColLetter(priceIdx);
-        var actL = getColLetter(actIdx);
-        var cPriceL = getColLetter(cPriceIdx);
-        var cValL = getColLetter(cValIdx);
-        var amtL = getColLetter(amtIdx);
-        var plL = getColLetter(plIdx);
-        var fAmtL = getColLetter(fAmtIdx);
-        
-        var amtFormulas = [];
-        var valFormulas = [];
-        var plFormulas = [];
-        var plPctFormulas = [];
-        
-        for (var r = 2; r <= lastRow; r++) {
-          var amtF = "";
-          if (qtyL && priceL) {
-            if (fAmtL) {
-              amtF = '=IF(' + actL + r + '="Buy",(' + qtyL + r + '*' + priceL + r + ')+' + fAmtL + r + ',(' + qtyL + r + '*' + priceL + r + ')-' + fAmtL + r + ')';
-            } else {
-              amtF = "=" + qtyL + r + "*" + priceL + r;
+      // Batch formula update logic: run only on migration / version bump (Trap T3 prevention)
+      if (needsHeavyMigration) {
+        var lastRow = journalSheet.getLastRow();
+        if (lastRow >= 2) {
+          var finalHeaders = journalSheet.getRange(1, 1, 1, journalSheet.getLastColumn()).getValues()[0];
+          var finalHeadersLower = finalHeaders.map(function(h) { return h.toString().toLowerCase().trim(); });
+          
+          function getColLetter(colIdx) {
+            if (colIdx === -1) return "";
+            var temp = colIdx + 1;
+            var letter = "";
+            while (temp > 0) {
+              var mod = (temp - 1) % 26;
+              letter = String.fromCharCode(65 + mod) + letter;
+              temp = Math.floor((temp - mod - 1) / 26);
             }
+            return letter;
           }
-          amtFormulas.push([amtF]);
           
-          var valF = "";
-          if (qtyL && cPriceL) {
-            valF = "=" + qtyL + r + "*" + cPriceL + r;
-          }
-          valFormulas.push([valF]);
+          var qtyIdx = finalHeadersLower.indexOf("quantity");
+          if (qtyIdx === -1) qtyIdx = finalHeadersLower.indexOf("qty");
+          var priceIdx = finalHeadersLower.indexOf("price/unit");
+          if (priceIdx === -1) priceIdx = finalHeadersLower.indexOf("price_unit");
+          if (priceIdx === -1) priceIdx = finalHeadersLower.indexOf("price");
+          var actIdx = finalHeadersLower.indexOf("action");
+          var cPriceIdx = finalHeadersLower.indexOf("current price");
+          var cValIdx = finalHeadersLower.indexOf("current value");
+          var amtIdx = finalHeadersLower.indexOf("amount");
+          var plIdx = finalHeadersLower.indexOf("p&l");
+          var plPctIdx = finalHeadersLower.indexOf("p&l %");
+          var fAmtIdx = finalHeadersLower.indexOf("fee amount");
+          if (fAmtIdx === -1) fAmtIdx = finalHeadersLower.indexOf("fee");
           
-          var plF = "";
-          if (actL && cValL && amtL) {
-            plF = '=IF(' + actL + r + '="Buy",' + cValL + r + '-' + amtL + r + ',' + amtL + r + '-' + cValL + r + ')';
-          }
-          plFormulas.push([plF]);
+          var qtyL = getColLetter(qtyIdx);
+          var priceL = getColLetter(priceIdx);
+          var actL = getColLetter(actIdx);
+          var cPriceL = getColLetter(cPriceIdx);
+          var cValL = getColLetter(cValIdx);
+          var amtL = getColLetter(amtIdx);
+          var plL = getColLetter(plIdx);
+          var fAmtL = getColLetter(fAmtIdx);
           
-          var plPctF = "";
-          if (plL && amtL) {
-            plPctF = "=IF(" + amtL + r + "=0,0," + plL + r + "/" + amtL + r + ")";
+          var amtFormulas = [];
+          var valFormulas = [];
+          var plFormulas = [];
+          var plPctFormulas = [];
+          
+          for (var r = 2; r <= lastRow; r++) {
+            var amtF = "";
+            if (qtyL && priceL) {
+              if (fAmtL) {
+                amtF = '=IF(' + actL + r + '="Buy",(' + qtyL + r + '*' + priceL + r + ')+' + fAmtL + r + ',(' + qtyL + r + '*' + priceL + r + ')-' + fAmtL + r + ')';
+              } else {
+                amtF = "=" + qtyL + r + "*" + priceL + r;
+              }
+            }
+            amtFormulas.push([amtF]);
+            
+            var valF = "";
+            if (qtyL && cPriceL) {
+              valF = "=" + qtyL + r + "*" + cPriceL + r;
+            }
+            valFormulas.push([valF]);
+            
+            var plF = "";
+            if (actL && cValL && amtL) {
+              plF = '=IF(' + actL + r + '="Buy",' + cValL + r + '-' + amtL + r + ',' + amtL + r + '-' + cValL + r + ')';
+            }
+            plFormulas.push([plF]);
+            
+            var plPctF = "";
+            if (plL && amtL) {
+              plPctF = "=IF(" + amtL + r + "=0,0," + plL + r + "/" + amtL + r + ")";
+            }
+            plPctFormulas.push([plPctF]);
           }
-          plPctFormulas.push([plPctF]);
-        }
-        
-        if (amtIdx !== -1 && amtFormulas.length > 0) {
-          journalSheet.getRange(2, amtIdx + 1, amtFormulas.length, 1).setFormulas(amtFormulas);
-        }
-        if (cValIdx !== -1 && valFormulas.length > 0) {
-          journalSheet.getRange(2, cValIdx + 1, valFormulas.length, 1).setFormulas(valFormulas);
-        }
-        if (plIdx !== -1 && plFormulas.length > 0) {
-          journalSheet.getRange(2, plIdx + 1, plFormulas.length, 1).setFormulas(plFormulas);
-        }
-        if (plPctIdx !== -1 && plPctFormulas.length > 0) {
-          journalSheet.getRange(2, plPctIdx + 1, plPctFormulas.length, 1).setFormulas(plPctFormulas);
+          
+          if (amtIdx !== -1 && amtFormulas.length > 0) {
+            journalSheet.getRange(2, amtIdx + 1, amtFormulas.length, 1).setFormulas(amtFormulas);
+          }
+          if (cValIdx !== -1 && valFormulas.length > 0) {
+            journalSheet.getRange(2, cValIdx + 1, valFormulas.length, 1).setFormulas(valFormulas);
+          }
+          if (plIdx !== -1 && plFormulas.length > 0) {
+            journalSheet.getRange(2, plIdx + 1, plFormulas.length, 1).setFormulas(plFormulas);
+          }
+          if (plPctIdx !== -1 && plPctFormulas.length > 0) {
+            journalSheet.getRange(2, plPctIdx + 1, plPctFormulas.length, 1).setFormulas(plPctFormulas);
+          }
         }
       }
     }
@@ -291,13 +334,13 @@ function ensureTableStructure() {
       [2000000, 50]
     ]);
   } else {
-    var lastCol = portfoliosSheet.getLastColumn();
-    if (lastCol === 0) {
+    var pLastCol = portfoliosSheet.getLastColumn();
+    if (pLastCol === 0) {
       portfoliosSheet.getRange(1, 1, 1, PORTFOLIOS_HEADERS.length).setValues([PORTFOLIOS_HEADERS]);
       portfoliosSheet.getRange(1, 1, 1, PORTFOLIOS_HEADERS.length).setFontWeight("bold");
       portfoliosSheet.setFrozenRows(1);
     } else {
-      var rawHeaders = portfoliosSheet.getRange(1, 1, 1, lastCol).getValues()[0];
+      var rawHeaders = portfoliosSheet.getRange(1, 1, 1, pLastCol).getValues()[0];
       var cleanHeaders = [];
       var changed = false;
       
@@ -336,11 +379,121 @@ function ensureTableStructure() {
         }
       }
       if (missingHeaders.length > 0) {
-        portfoliosSheet.getRange(1, lastCol + 1, 1, missingHeaders.length).setValues([missingHeaders]);
-        portfoliosSheet.getRange(1, lastCol + 1, 1, missingHeaders.length).setFontWeight("bold");
+        portfoliosSheet.getRange(1, pLastCol + 1, 1, missingHeaders.length).setValues([missingHeaders]);
+        portfoliosSheet.getRange(1, pLastCol + 1, 1, missingHeaders.length).setFontWeight("bold");
       }
     }
   }
+  
+  // 3. Repair or create Rebalance_Pairs sheet
+  var pairsSheet = ss.getSheetByName("Rebalance_Pairs");
+  if (!pairsSheet) {
+    pairsSheet = ss.insertSheet("Rebalance_Pairs");
+    pairsSheet.getRange(1, 1, 1, REBALANCE_PAIRS_HEADERS.length).setValues([REBALANCE_PAIRS_HEADERS]);
+    pairsSheet.getRange(1, 1, 1, REBALANCE_PAIRS_HEADERS.length).setFontWeight("bold");
+    pairsSheet.setFrozenRows(1);
+  } else {
+    var rpLastCol = pairsSheet.getLastColumn();
+    if (rpLastCol === 0) {
+      pairsSheet.getRange(1, 1, 1, REBALANCE_PAIRS_HEADERS.length).setValues([REBALANCE_PAIRS_HEADERS]);
+      pairsSheet.getRange(1, 1, 1, REBALANCE_PAIRS_HEADERS.length).setFontWeight("bold");
+      pairsSheet.setFrozenRows(1);
+    }
+  }
+  
+  // 4. Repair or create Rebalance_Log sheet
+  var logSheet = ss.getSheetByName("Rebalance_Log");
+  if (!logSheet) {
+    logSheet = ss.insertSheet("Rebalance_Log");
+    logSheet.getRange(1, 1, 1, REBALANCE_LOG_HEADERS.length).setValues([REBALANCE_LOG_HEADERS]);
+    logSheet.getRange(1, 1, 1, REBALANCE_LOG_HEADERS.length).setFontWeight("bold");
+    logSheet.setFrozenRows(1);
+  } else {
+    var rlLastCol = logSheet.getLastColumn();
+    if (rlLastCol === 0) {
+      logSheet.getRange(1, 1, 1, REBALANCE_LOG_HEADERS.length).setValues([REBALANCE_LOG_HEADERS]);
+      logSheet.getRange(1, 1, 1, REBALANCE_LOG_HEADERS.length).setFontWeight("bold");
+      logSheet.setFrozenRows(1);
+    }
+  }
+  
+  if (needsHeavyMigration) {
+    props.setProperty("SCHEMA_VERSION", SCHEMA_VERSION);
+  }
+}
+
+// Sequence generator helper
+function nextId(prefix) {
+  var propKey = prefix + "_SEQ";
+  var props = PropertiesService.getScriptProperties();
+  var seqStr = props.getProperty(propKey);
+  var seq = parseInt(seqStr, 10);
+  if (isNaN(seq) || seq < 0) {
+    seq = 0;
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    if (prefix === "RP") {
+      var pSheet = ss.getSheetByName("Rebalance_Pairs");
+      if (pSheet && pSheet.getLastRow() >= 2) {
+        var vals = pSheet.getRange(2, 1, pSheet.getLastRow() - 1, 1).getValues();
+        for (var i = 0; i < vals.length; i++) {
+          var m = String(vals[i][0]).match(/RP-(\d+)/i);
+          if (m) seq = Math.max(seq, parseInt(m[1], 10));
+        }
+      }
+    } else if (prefix === "RB") {
+      var lSheet = ss.getSheetByName("Rebalance_Log");
+      if (lSheet && lSheet.getLastRow() >= 2) {
+        var vals = lSheet.getRange(2, 1, lSheet.getLastRow() - 1, 1).getValues();
+        for (var i = 0; i < vals.length; i++) {
+          var m = String(vals[i][0]).match(/RB-(\d+)/i);
+          if (m) seq = Math.max(seq, parseInt(m[1], 10));
+        }
+      }
+    }
+  }
+  seq += 1;
+  props.setProperty(propKey, seq.toString());
+  var numStr = ("0000" + seq).slice(-4);
+  return prefix + "-" + numStr;
+}
+
+// Calculate held quantity for an asset within a specific portfolio
+function getHeldQty(portfolio, assetName) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("Journal");
+  if (!sheet || sheet.getLastRow() <= 1) return 0;
+  
+  var rows = sheet.getDataRange().getValues();
+  var headers = rows[0].map(function(h) { return h.toString().toLowerCase().trim(); });
+  var portIdx = headers.indexOf("portfolio");
+  var assetIdx = headers.indexOf("asset name");
+  var actIdx = headers.indexOf("action");
+  var qtyIdx = headers.indexOf("quantity");
+  if (qtyIdx === -1) qtyIdx = headers.indexOf("qty");
+  
+  var held = 0;
+  var targetAsset = String(assetName || '').trim().toUpperCase();
+  var targetPort = String(portfolio || '').trim();
+  
+  for (var i = 1; i < rows.length; i++) {
+    var r = rows[i];
+    var rPort = portIdx !== -1 ? String(r[portIdx] || '').trim() : '';
+    if (rPort !== targetPort) continue;
+    
+    var rAsset = assetIdx !== -1 ? String(r[assetIdx] || '').trim().toUpperCase() : '';
+    if (rAsset !== targetAsset) continue;
+    
+    var act = actIdx !== -1 ? String(r[actIdx] || '').trim().toLowerCase() : '';
+    var q = qtyIdx !== -1 ? parseFloat(r[qtyIdx]) || 0 : 0;
+    
+    if (act === "buy") {
+      held += q;
+    } else if (act === "sell") {
+      held -= q;
+      if (held < 0) held = 0;
+    }
+  }
+  return held;
 }
 
 function getDashboardData() {
@@ -348,122 +501,224 @@ function getDashboardData() {
   
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName("Journal");
-  var rows = sheet.getDataRange().getValues();
+  var rows = sheet ? sheet.getDataRange().getValues() : [];
   
   var trades = [];
   var portfolios = ["Main Trading", "BTC Stock", "Crypto"];
   var uniqueAssets = [];
   var assetTypesMap = {};
   
-  if (rows.length <= 1) {
-    return {
-      trades: [],
-      portfolios: portfolios,
-      portfolioConfigs: {},
-      livePrices: {},
-      liveRates: { "THB": 1.0, "USD": 35.0, "EUR": 38.0 },
-      syncTime: new Date().toISOString()
-    };
+  if (rows.length > 1) {
+    var headers = rows[0].map(function(h) { return h.toString().toLowerCase().trim(); });
+    
+    function findColIdx(keywords) {
+      for (var i = 0; i < headers.length; i++) {
+        var h = headers[i];
+        for (var k = 0; k < keywords.length; k++) {
+          if (h === keywords[k] || h.indexOf(keywords[k]) !== -1) {
+            return i;
+          }
+        }
+      }
+      return -1;
+    }
+    
+    var dateIdx = findColIdx(["date"]);
+    var assetNameIdx = findColIdx(["asset name", "asset_name", "asset"]);
+    var assetTypeIdx = findColIdx(["asset type", "asset_type", "type"]);
+    var currencyIdx = findColIdx(["currency"]);
+    var actionIdx = findColIdx(["action"]);
+    var quantityIdx = findColIdx(["quantity", "qty"]);
+    var priceUnitIdx = findColIdx(["price/unit", "price_unit", "price unit", "price"]);
+    var whyIdx = findColIdx(["why (decision reason)", "why", "decision", "reason"]);
+    var remarkIdx = findColIdx(["remark", "note"]);
+    var portfolioIdx = findColIdx(["portfolio", "port"]);
+    var feeAmountIdx = findColIdx(["fee amount", "fee_amount", "fee"]);
+    var rebalanceIdIdx = findColIdx(["rebalance id", "rebalance_id"]);
+    
+    for (var i = 1; i < rows.length; i++) {
+      var row = rows[i];
+      var assetName = assetNameIdx !== -1 ? row[assetNameIdx].toString().trim().toUpperCase() : "";
+      var assetType = assetTypeIdx !== -1 ? row[assetTypeIdx].toString().trim() : "Thai Stock";
+      
+      if (!assetName) continue;
+      
+      var dateVal = "";
+      if (dateIdx !== -1 && row[dateIdx]) {
+        var d = row[dateIdx];
+        if (d instanceof Date) {
+          dateVal = Utilities.formatDate(d, Session.getScriptTimeZone(), "yyyy-MM-dd");
+        } else {
+          dateVal = d.toString().split(" ")[0].trim();
+        }
+      } else {
+        dateVal = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd");
+      }
+      
+      var portfolio = "Main Trading";
+      if (portfolioIdx !== -1 && row[portfolioIdx]) {
+        portfolio = row[portfolioIdx].toString().trim();
+      } else {
+        if (assetType.toLowerCase() === "crypto" || assetType.toLowerCase() === "crypto short 1x") {
+          portfolio = "Crypto";
+        } else if (assetType.toLowerCase() === "global stock" || assetType.toLowerCase() === "us stock") {
+          portfolio = "BTC Stock";
+        }
+      }
+      
+      var qty = quantityIdx !== -1 ? parseFloat(row[quantityIdx]) : 0.0;
+      if (isNaN(qty)) qty = 0.0;
+      
+      var price = priceUnitIdx !== -1 ? parseFloat(row[priceUnitIdx]) : 0.0;
+      if (isNaN(price)) price = 0.0;
+      
+      var feeAmount = 0.0;
+      if (feeAmountIdx !== -1 && row[feeAmountIdx]) {
+        try {
+          var rawFee = row[feeAmountIdx].toString().replace("%", "").trim();
+          feeAmount = parseFloat(rawFee) || 0.0;
+        } catch (e) {}
+      }
+      
+      var rebalanceId = rebalanceIdIdx !== -1 && row[rebalanceIdIdx] ? row[rebalanceIdIdx].toString().trim() : "";
+      
+      var trade = {
+        id: (i + 1).toString(), 
+        date: dateVal,
+        portfolio: portfolio,
+        assetName: assetName,
+        assetType: assetType,
+        currency: currencyIdx !== -1 && row[currencyIdx] ? row[currencyIdx].toString().trim() : "THB",
+        action: actionIdx !== -1 && row[actionIdx] ? row[actionIdx].toString().trim() : "Buy",
+        quantity: qty,
+        priceUnit: price,
+        why: whyIdx !== -1 && row[whyIdx] ? row[whyIdx].toString().trim() : "",
+        remark: remarkIdx !== -1 && row[remarkIdx] ? row[remarkIdx].toString().trim() : "",
+        feeAmount: feeAmount,
+        rebalanceId: rebalanceId
+      };
+      
+      trades.push(trade);
+      
+      var underlyingAsset = assetName.indexOf(":S1X") !== -1 ? assetName.replace(":S1X", "") : assetName;
+      if (uniqueAssets.indexOf(underlyingAsset) === -1) {
+        uniqueAssets.push(underlyingAsset);
+        assetTypesMap[underlyingAsset] = assetType === "Crypto Short 1x" ? "Crypto" : assetType;
+      }
+      
+      if (portfolio && portfolios.indexOf(portfolio) === -1) {
+        portfolios.push(portfolio);
+      }
+    }
   }
   
-  var headers = rows[0].map(function(h) { return h.toString().toLowerCase().trim(); });
-  
-  function findColIdx(keywords) {
-    for (var i = 0; i < headers.length; i++) {
-      var h = headers[i];
-      for (var k = 0; k < keywords.length; k++) {
-        if (h.indexOf(keywords[k]) !== -1) {
-          return i;
+  // Read Rebalance Pairs
+  var rebalancePairs = [];
+  try {
+    var rpSheet = ss.getSheetByName("Rebalance_Pairs");
+    if (rpSheet && rpSheet.getLastRow() >= 2) {
+      var rpRows = rpSheet.getDataRange().getValues();
+      var rpH = rpRows[0].map(function(h) { return h.toString().toLowerCase().trim(); });
+      
+      function getRpVal(row, key, def) {
+        var idx = rpH.indexOf(key.toLowerCase());
+        return idx !== -1 && row[idx] !== undefined && row[idx] !== "" ? row[idx] : def;
+      }
+      
+      for (var r = 1; r < rpRows.length; r++) {
+        var rpRow = rpRows[r];
+        var pId = getRpVal(rpRow, "pair id", "");
+        if (!pId) continue;
+        
+        var pairObj = {
+          pairId: String(pId),
+          portfolio: String(getRpVal(rpRow, "portfolio", "")),
+          pairName: String(getRpVal(rpRow, "pair name", "")),
+          assetA: String(getRpVal(rpRow, "asset a", "")).toUpperCase(),
+          assetAType: String(getRpVal(rpRow, "asset a type", "Crypto")),
+          assetACurrency: String(getRpVal(rpRow, "asset a currency", "USD")),
+          targetA: parseFloat(getRpVal(rpRow, "target a %", 50)) || 50,
+          assetB: String(getRpVal(rpRow, "asset b", "")).toUpperCase(),
+          assetBType: String(getRpVal(rpRow, "asset b type", "Crypto Short 1x")),
+          assetBCurrency: String(getRpVal(rpRow, "asset b currency", "USD")),
+          targetB: parseFloat(getRpVal(rpRow, "target b %", 50)) || 50,
+          mode: String(getRpVal(rpRow, "trigger mode", "Drift")),
+          driftThreshold: parseFloat(getRpVal(rpRow, "drift threshold %", 5)) || 5,
+          scheduleFrequency: String(getRpVal(rpRow, "schedule frequency", "Monthly")),
+          scheduleAnchor: String(getRpVal(rpRow, "schedule anchor", "")),
+          lastRebalanced: String(getRpVal(rpRow, "last rebalanced", "")),
+          customFee: getRpVal(rpRow, "custom fee", false) === true || String(getRpVal(rpRow, "custom fee", "")).toUpperCase() === "TRUE",
+          feeAMode: String(getRpVal(rpRow, "fee a mode", "percent")),
+          feeAValue: parseFloat(getRpVal(rpRow, "fee a value", 0)) || 0,
+          feeBMode: String(getRpVal(rpRow, "fee b mode", "percent")),
+          feeBValue: parseFloat(getRpVal(rpRow, "fee b value", 0)) || 0,
+          status: String(getRpVal(rpRow, "status", "Active")),
+          created: String(getRpVal(rpRow, "created", "")),
+          notes: String(getRpVal(rpRow, "notes", ""))
+        };
+        rebalancePairs.push(pairObj);
+        
+        // Ensure live prices are fetched for pair assets
+        if (pairObj.status === "Active") {
+          [pairObj.assetA, pairObj.assetB].forEach(function(sym) {
+            if (!sym) return;
+            var cleanSym = sym.indexOf(":S1X") !== -1 ? sym.replace(":S1X", "") : sym;
+            if (uniqueAssets.indexOf(cleanSym) === -1) {
+              uniqueAssets.push(cleanSym);
+              assetTypesMap[cleanSym] = "Crypto";
+            }
+          });
         }
       }
     }
-    return -1;
-  }
+  } catch (e) {}
   
-  var dateIdx = findColIdx(["date"]);
-  var assetNameIdx = findColIdx(["asset name", "asset_name", "asset"]);
-  var assetTypeIdx = findColIdx(["asset type", "asset_type", "type"]);
-  var currencyIdx = findColIdx(["currency"]);
-  var actionIdx = findColIdx(["action"]);
-  var quantityIdx = findColIdx(["quantity", "qty"]);
-  var priceUnitIdx = findColIdx(["price/unit", "price_unit", "price unit", "price"]);
-  var whyIdx = findColIdx(["why", "decision", "reason"]);
-  var remarkIdx = findColIdx(["remark", "note"]);
-  var portfolioIdx = findColIdx(["portfolio", "port"]);
-  var feeAmountIdx = findColIdx(["fee amount", "fee_amount", "fee"]);
-  
-  for (var i = 1; i < rows.length; i++) {
-    var row = rows[i];
-    var assetName = assetNameIdx !== -1 ? row[assetNameIdx].toString().trim().toUpperCase() : "";
-    var assetType = assetTypeIdx !== -1 ? row[assetTypeIdx].toString().trim() : "Thai Stock";
-    
-    if (!assetName) continue;
-    
-    var dateVal = "";
-    if (dateIdx !== -1 && row[dateIdx]) {
-      var d = row[dateIdx];
-      if (d instanceof Date) {
-        dateVal = Utilities.formatDate(d, Session.getScriptTimeZone(), "yyyy-MM-dd");
-      } else {
-        dateVal = d.toString().split(" ")[0].trim();
+  // Read Rebalance Log
+  var rebalanceLog = [];
+  try {
+    var rlSheet = ss.getSheetByName("Rebalance_Log");
+    if (rlSheet && rlSheet.getLastRow() >= 2) {
+      var rlRows = rlSheet.getDataRange().getValues();
+      var rlH = rlRows[0].map(function(h) { return h.toString().toLowerCase().trim(); });
+      
+      function getRlVal(row, key, def) {
+        var idx = rlH.indexOf(key.toLowerCase());
+        return idx !== -1 && row[idx] !== undefined && row[idx] !== "" ? row[idx] : def;
       }
-    } else {
-      dateVal = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd");
-    }
-    
-    var portfolio = "Main Trading";
-    if (portfolioIdx !== -1 && row[portfolioIdx]) {
-      portfolio = row[portfolioIdx].toString().trim();
-    } else {
-      if (assetType.toLowerCase() === "crypto") {
-        portfolio = "Crypto";
-      } else if (assetType.toLowerCase() === "global stock" || assetType.toLowerCase() === "us stock") {
-        portfolio = "BTC Stock";
+      
+      for (var l = 1; l < rlRows.length; l++) {
+        var rlRow = rlRows[l];
+        var rId = getRlVal(rlRow, "rebalance id", "");
+        if (!rId) continue;
+        
+        rebalanceLog.push({
+          rebalanceId: String(rId),
+          pairId: String(getRlVal(rlRow, "pair id", "")),
+          portfolio: String(getRlVal(rlRow, "portfolio", "")),
+          executedOn: String(getRlVal(rlRow, "executed on", "")),
+          trigger: String(getRlVal(rlRow, "trigger", "")),
+          sellAsset: String(getRlVal(rlRow, "sell asset", "")),
+          sellQty: parseFloat(getRlVal(rlRow, "sell qty", 0)) || 0,
+          sellPrice: parseFloat(getRlVal(rlRow, "sell price", 0)) || 0,
+          sellFee: parseFloat(getRlVal(rlRow, "sell fee", 0)) || 0,
+          buyAsset: String(getRlVal(rlRow, "buy asset", "")),
+          buyQty: parseFloat(getRlVal(rlRow, "buy qty", 0)) || 0,
+          buyPrice: parseFloat(getRlVal(rlRow, "buy price", 0)) || 0,
+          buyFee: parseFloat(getRlVal(rlRow, "buy fee", 0)) || 0,
+          valueMovedTHB: parseFloat(getRlVal(rlRow, "value moved thb", 0)) || 0,
+          beforePctA: parseFloat(getRlVal(rlRow, "before a %", 0)) || 0,
+          targetPctA: parseFloat(getRlVal(rlRow, "target a %", 0)) || 0,
+          afterPctA: parseFloat(getRlVal(rlRow, "after a %", 0)) || 0,
+          realizedPnLTHB: parseFloat(getRlVal(rlRow, "realized pnl thb", 0)) || 0,
+          reason: String(getRlVal(rlRow, "reason", "")),
+          status: String(getRlVal(rlRow, "status", "Done")),
+          created: String(getRlVal(rlRow, "created", ""))
+        });
       }
     }
-    
-    var qty = quantityIdx !== -1 ? parseFloat(row[quantityIdx]) : 0.0;
-    if (isNaN(qty)) qty = 0.0;
-    
-    var price = priceUnitIdx !== -1 ? parseFloat(row[priceUnitIdx]) : 0.0;
-    if (isNaN(price)) price = 0.0;
-    
-    var feeAmount = 0.0;
-    if (feeAmountIdx !== -1 && row[feeAmountIdx]) {
-      try {
-        var rawFee = row[feeAmountIdx].toString().replace("%", "").trim();
-        feeAmount = parseFloat(rawFee) || 0.0;
-      } catch (e) {}
-    }
-    
-    var trade = {
-      id: (i + 1).toString(), 
-      date: dateVal,
-      portfolio: portfolio,
-      assetName: assetName,
-      assetType: assetType,
-      currency: currencyIdx !== -1 && row[currencyIdx] ? row[currencyIdx].toString().trim() : "THB",
-      action: actionIdx !== -1 && row[actionIdx] ? row[actionIdx].toString().trim() : "Buy",
-      quantity: qty,
-      priceUnit: price,
-      why: whyIdx !== -1 && row[whyIdx] ? row[whyIdx].toString().trim() : "",
-      remark: remarkIdx !== -1 && row[remarkIdx] ? row[remarkIdx].toString().trim() : "",
-      feeAmount: feeAmount
-    };
-    
-    trades.push(trade);
-    
-    if (uniqueAssets.indexOf(assetName) === -1) {
-      uniqueAssets.push(assetName);
-      assetTypesMap[assetName] = assetType;
-    }
-    
-    if (portfolio && portfolios.indexOf(portfolio) === -1) {
-      portfolios.push(portfolio);
-    }
-  }
+  } catch (e) {}
   
-  // High Performance Parallel Market Data Fetch (Converts O(N) calls to O(1) concurrent batch request)
+  // Parallel Market Data Fetch
   var livePrices = {};
   var liveRates = { "THB": 1.0, "USD": 35.0, "EUR": 38.0 };
   
@@ -560,30 +815,23 @@ function getDashboardData() {
     trades: trades,
     portfolios: portfolios,
     portfolioConfigs: portfolioConfigs,
+    rebalancePairs: rebalancePairs,
+    rebalanceLog: rebalanceLog,
     livePrices: livePrices,
     liveRates: liveRates,
     syncTime: new Date().toISOString()
   };
 }
 
-// Atomic Batch Write (Writes all columns concurrently to avoid row-loop round-trip lag)
-function addTrade(trade) {
-  ensureTableStructure();
-  
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName("Journal");
-  var lastRow = sheet.getLastRow();
-  var newRowIdx = lastRow + 1;
-  var lastCol = sheet.getLastColumn();
-  
-  var headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+// Build a Journal row array
+function buildJournalRow(headers, newRowIdx, trade) {
   var headersLower = headers.map(function(h) { return h.toString().toLowerCase().trim(); });
   
   function getIndex(keywords) {
     for (var i = 0; i < headersLower.length; i++) {
       var h = headersLower[i];
       for (var k = 0; k < keywords.length; k++) {
-        if (h.indexOf(keywords[k]) !== -1) {
+        if (h === keywords[k] || h.indexOf(keywords[k]) !== -1) {
           return i;
         }
       }
@@ -591,7 +839,7 @@ function addTrade(trade) {
     return -1;
   }
   
-  var rowValues = new Array(lastCol).fill("");
+  var rowValues = new Array(headers.length).fill("");
   
   var tsIdx = getIndex(["timestamp"]);
   var dateIdx = getIndex(["date"]);
@@ -605,6 +853,7 @@ function addTrade(trade) {
   var remarkIdx = getIndex(["remark", "note"]);
   var portfolioIdx = getIndex(["portfolio", "port"]);
   var feeAmountIdx = getIndex(["fee amount", "fee_amount", "fee"]);
+  var rebalanceIdIdx = getIndex(["rebalance id", "rebalance_id"]);
   
   var amountIdx = getIndex(["amount"]);
   var curPriceIdx = getIndex(["current price"]);
@@ -616,7 +865,7 @@ function addTrade(trade) {
     if (!str) return "";
     var s = str.toString().trim();
     if (s.indexOf("=") === 0 || s.indexOf("+") === 0 || s.indexOf("-") === 0 || s.indexOf("@") === 0) {
-      return "'" + s; // Escape formula injection
+      return "'" + s;
     }
     return s;
   }
@@ -633,6 +882,7 @@ function addTrade(trade) {
   if (remarkIdx !== -1) rowValues[remarkIdx] = sanitizeString(trade.remark);
   if (portfolioIdx !== -1) rowValues[portfolioIdx] = trade.portfolio || "Main Trading";
   if (feeAmountIdx !== -1) rowValues[feeAmountIdx] = parseFloat(trade.feeAmount) || 0.0;
+  if (rebalanceIdIdx !== -1) rowValues[rebalanceIdIdx] = sanitizeString(trade.rebalanceId || "");
   
   function getColLetter(colIdx) {
     if (colIdx === -1) return "";
@@ -655,7 +905,6 @@ function addTrade(trade) {
   var pnlLetter = getColLetter(pnlIdx);
   var feeLetter = getColLetter(feeAmountIdx);
   
-  // Set calculation formulas
   if (amountIdx !== -1 && qtyLetter && priceLetter) {
     if (feeLetter) {
       rowValues[amountIdx] = '=IF(' + actionLetter + newRowIdx + '="Buy",(' + qtyLetter + newRowIdx + '*' + priceLetter + newRowIdx + ')+' + feeLetter + newRowIdx + ',(' + qtyLetter + newRowIdx + '*' + priceLetter + newRowIdx + ')-' + feeLetter + newRowIdx + ')';
@@ -680,6 +929,21 @@ function addTrade(trade) {
     rowValues[pnlPctIdx] = "=IF(" + amountLetter + newRowIdx + "=0,0," + pnlLetter + newRowIdx + "/" + amountLetter + newRowIdx + ")";
   }
   
+  return rowValues;
+}
+
+// Atomic Batch Write for adding trade
+function addTrade(trade) {
+  ensureTableStructure();
+  
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("Journal");
+  var lastRow = sheet.getLastRow();
+  var newRowIdx = lastRow + 1;
+  var lastCol = sheet.getLastColumn();
+  
+  var headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+  var rowValues = buildJournalRow(headers, newRowIdx, trade);
   sheet.getRange(newRowIdx, 1, 1, rowValues.length).setValues([rowValues]);
   return { success: true };
 }
@@ -691,52 +955,32 @@ function deleteTrade(tradeId) {
   
   var idStr = tradeId.toString().trim();
   if (idStr.indexOf("sig-") === 0) {
-    // Locate row by composite signature
     var rows = sheet.getDataRange().getValues();
     if (rows.length <= 1) {
       return { success: false, error: "Journal is empty." };
     }
     
     var headers = rows[0].map(function(h) { return h.toString().toLowerCase().trim(); });
-    function findColIdx(keywords) {
-      for (var i = 0; i < headers.length; i++) {
-        var h = headers[i];
-        for (var k = 0; k < keywords.length; k++) {
-          if (h.indexOf(keywords[k]) !== -1) return i;
-        }
-      }
-      return -1;
-    }
-    
-    var dateIdx = findColIdx(["date"]);
-    var assetNameIdx = findColIdx(["asset name", "asset_name", "asset"]);
-    var actionIdx = findColIdx(["action"]);
-    var quantityIdx = findColIdx(["quantity", "qty"]);
-    var priceUnitIdx = findColIdx(["price/unit", "price_unit", "price unit", "price"]);
-    var tsIdx = findColIdx(["timestamp"]);
+    var dateIdx = headers.indexOf("date");
+    var assetIdx = headers.indexOf("asset name");
+    var actIdx = headers.indexOf("action");
+    var qtyIdx = headers.indexOf("quantity");
+    if (qtyIdx === -1) qtyIdx = headers.indexOf("qty");
+    var priceIdx = headers.indexOf("price/unit");
+    if (priceIdx === -1) priceIdx = headers.indexOf("price_unit");
+    if (priceIdx === -1) priceIdx = headers.indexOf("price");
     
     for (var i = 1; i < rows.length; i++) {
-      var row = rows[i];
-      
-      // Match by written timestamp signature first
-      var tsVal = tsIdx !== -1 ? row[tsIdx].toString().trim() : "";
-      if (tsVal === idStr) {
-        sheet.deleteRow(i + 1);
-        return { success: true, deletedRow: i + 1, method: "timestamp" };
-      }
-      
-      // Fallback: reconstruct signature
+      var r = rows[i];
       try {
-        var assetName = assetNameIdx !== -1 ? row[assetNameIdx].toString().trim().toUpperCase() : "";
-        var action = actionIdx !== -1 ? row[actionIdx].toString().trim() : "Buy";
-        action = action.charAt(0).toUpperCase() + action.slice(1).toLowerCase();
-        
-        var qty = quantityIdx !== -1 ? parseFloat(row[quantityIdx]) : 0.0;
-        var price = priceUnitIdx !== -1 ? parseFloat(row[priceUnitIdx]) : 0.0;
+        var assetName = assetIdx !== -1 ? r[assetIdx].toString().trim().toUpperCase() : "";
+        var action = actIdx !== -1 ? r[actIdx].toString().trim() : "";
+        var qty = qtyIdx !== -1 ? parseFloat(r[qtyIdx]) || 0 : 0;
+        var price = priceIdx !== -1 ? parseFloat(r[priceIdx]) || 0 : 0;
         
         var dateVal = "";
-        if (dateIdx !== -1 && row[dateIdx]) {
-          var d = row[dateIdx];
+        if (dateIdx !== -1 && r[dateIdx]) {
+          var d = r[dateIdx];
           if (d instanceof Date) {
             dateVal = Utilities.formatDate(d, Session.getScriptTimeZone(), "yyyy-MM-dd");
           } else {
@@ -753,7 +997,6 @@ function deleteTrade(tradeId) {
     }
     return { success: false, error: "Trade signature not found: " + idStr };
   } else {
-    // Locate row by direct row index (Cloud Mode deletes)
     var rowIdx = parseInt(tradeId);
     if (rowIdx > 1 && rowIdx <= lastRow) {
       sheet.deleteRow(rowIdx);
@@ -849,58 +1092,57 @@ function deletePortfolio(portfolioName) {
     var nameValues = sheet.getRange(1, namesColIdx + 1, lastRow, 1).getValues();
     for (var i = 1; i < nameValues.length; i++) {
       if (nameValues[i][0].toString().trim().toLowerCase() === portfolioName.toLowerCase()) {
-        sheet.getRange(i + 1, namesColIdx + 1).setValue(""); 
-        // Also clear configuration values
-        var capColIdx = headersLower.indexOf("initial capital");
-        var stocksColIdx = headersLower.indexOf("target stocks");
-        if (capColIdx !== -1) sheet.getRange(i + 1, capColIdx + 1).setValue("");
-        if (stocksColIdx !== -1) sheet.getRange(i + 1, stocksColIdx + 1).setValue("");
+        sheet.getRange(i + 1, namesColIdx + 1).clearContent();
+        return { success: true };
       }
     }
   }
-  
-  var assetColIdx = headersLower.indexOf("asset name");
-  var portColIdx = headersLower.indexOf("portfolio");
-  if (assetColIdx !== -1 && portColIdx !== -1) {
-    var mappingValues = sheet.getRange(1, 1, lastRow, Math.max(assetColIdx, portColIdx) + 1).getValues();
-    for (var j = lastRow; j >= 2; j--) {
-      var mappedPort = mappingValues[j-1][portColIdx].toString().trim();
-      if (mappedPort.toLowerCase() === portfolioName.toLowerCase()) {
-        sheet.getRange(j, assetColIdx + 1).clearContent();
-        sheet.getRange(j, portColIdx + 1).clearContent();
-      }
-    }
-  }
-  
-  return { success: true };
+  return { success: false, error: "Portfolio not found." };
 }
 
 function renamePortfolio(oldName, newName) {
   ensureTableStructure();
   var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName("Portfolios");
-  var lastRow = sheet.getLastRow();
+  var pSheet = ss.getSheetByName("Portfolios");
+  var jSheet = ss.getSheetByName("Journal");
   
-  var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
-  var headersLower = headers.map(function(h) { return h.toString().toLowerCase().trim(); });
-  var namesColIdx = headersLower.indexOf("portfolio names");
+  // 1. Rename in Portfolios sheet
+  var pLastRow = pSheet.getLastRow();
+  var pHeaders = pSheet.getRange(1, 1, 1, pSheet.getLastColumn()).getValues()[0].map(function(h) { return h.toString().toLowerCase().trim(); });
+  var namesColIdx = pHeaders.indexOf("portfolio names");
   
   if (namesColIdx !== -1) {
-    var nameValues = sheet.getRange(1, namesColIdx + 1, lastRow, 1).getValues();
+    var nameValues = pSheet.getRange(1, namesColIdx + 1, pLastRow, 1).getValues();
     for (var i = 1; i < nameValues.length; i++) {
       if (nameValues[i][0].toString().trim().toLowerCase() === oldName.toLowerCase()) {
-        sheet.getRange(i + 1, namesColIdx + 1).setValue(newName);
+        pSheet.getRange(i + 1, namesColIdx + 1).setValue(newName);
+        break;
       }
     }
   }
   
-  var portColIdx = headersLower.indexOf("portfolio");
-  if (portColIdx !== -1) {
-    var portValues = sheet.getRange(1, portColIdx + 1, lastRow, 1).getValues();
-    for (var j = 2; j <= lastRow; j++) {
-      var mappedPort = portValues[j-1][0].toString().trim();
-      if (mappedPort.toLowerCase() === oldName.toLowerCase()) {
-        sheet.getRange(j, portColIdx + 1).setValue(newName);
+  // 2. Cascade rename across Journal rows
+  var jLastRow = jSheet.getLastRow();
+  if (jLastRow >= 2) {
+    var jHeaders = jSheet.getRange(1, 1, 1, jSheet.getLastColumn()).getValues()[0].map(function(h) { return h.toString().toLowerCase().trim(); });
+    var portColIdx = jHeaders.indexOf("portfolio");
+    if (portColIdx !== -1) {
+      var portValues = jSheet.getRange(1, portColIdx + 1, jLastRow, 1).getValues();
+      var batchUpdates = [];
+      var hasChanges = false;
+      
+      for (var j = 1; j < portValues.length; j++) {
+        var currentPort = portValues[j][0].toString().trim();
+        if (currentPort.toLowerCase() === oldName.toLowerCase()) {
+          batchUpdates.push([newName]);
+          hasChanges = true;
+        } else {
+          batchUpdates.push([currentPort]);
+        }
+      }
+      
+      if (hasChanges) {
+        jSheet.getRange(2, portColIdx + 1, batchUpdates.length, 1).setValues(batchUpdates);
       }
     }
   }
@@ -911,42 +1153,29 @@ function renamePortfolio(oldName, newName) {
 function transferPosition(assetName, targetPortfolio) {
   ensureTableStructure();
   var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName("Portfolios");
+  var sheet = ss.getSheetByName("Journal");
   var lastRow = sheet.getLastRow();
+  
+  if (lastRow <= 1) return { success: false, error: "Journal is empty." };
   
   var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
   var headersLower = headers.map(function(h) { return h.toString().toLowerCase().trim(); });
-  var assetColIdx = headersLower.indexOf("asset name");
-  var portColIdx = headersLower.indexOf("portfolio");
+  var assetIdx = headersLower.indexOf("asset name");
+  var portIdx = headersLower.indexOf("portfolio");
   
-  if (assetColIdx === -1 || portColIdx === -1) {
-    return { success: false, error: "Asset mappings columns missing." };
-  }
+  if (assetIdx === -1 || portIdx === -1) return { success: false, error: "Required columns missing." };
   
-  var mappingValues = sheet.getRange(1, 1, lastRow, Math.max(assetColIdx, portColIdx) + 1).getValues();
-  var found = false;
+  var assetValues = sheet.getRange(2, assetIdx + 1, lastRow - 1, 1).getValues();
+  var portValues = sheet.getRange(2, portIdx + 1, lastRow - 1, 1).getValues();
+  var targetUpper = assetName.toUpperCase().trim();
   
-  for (var i = 1; i < mappingValues.length; i++) {
-    if (mappingValues[i][assetColIdx].toString().trim().toUpperCase() === assetName.toUpperCase()) {
-      sheet.getRange(i + 1, portColIdx + 1).setValue(targetPortfolio);
-      found = true;
-      break;
+  for (var i = 0; i < assetValues.length; i++) {
+    if (assetValues[i][0].toString().toUpperCase().trim() === targetUpper) {
+      portValues[i][0] = targetPortfolio;
     }
   }
   
-  if (!found) {
-    var targetRow = lastRow + 1;
-    for (var i = 1; i < mappingValues.length; i++) {
-      if (mappingValues[i][assetColIdx] === "" && mappingValues[i][portColIdx] === "") {
-        targetRow = i + 1;
-        break;
-      }
-    }
-    sheet.getRange(targetRow, assetColIdx + 1).setValue(assetName.toUpperCase());
-    sheet.getRange(targetRow, portColIdx + 1).setValue(targetPortfolio);
-  }
-  
-  addPortfolio(targetPortfolio);
+  sheet.getRange(2, portIdx + 1, portValues.length, 1).setValues(portValues);
   return { success: true };
 }
 
@@ -1090,4 +1319,413 @@ function updateTradePortfolio(tradeId, targetPortfolio) {
     return { success: true };
   }
   return { success: false, error: "Row index out of bounds." };
+}
+
+// ==========================================
+// Rebalance Actions (Step 4 Backend Handlers)
+// ==========================================
+
+function savePair(pair) {
+  ensureTableStructure();
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var pairsSheet = ss.getSheetByName("Rebalance_Pairs");
+  var pRows = pairsSheet.getDataRange().getValues();
+  var pH = pRows[0].map(function(h) { return h.toString().toLowerCase().trim(); });
+  
+  var pIdCol = pH.indexOf("pair id");
+  var portCol = pH.indexOf("portfolio");
+  var aCol = pH.indexOf("asset a");
+  var bCol = pH.indexOf("asset b");
+  
+  var assetA = String(pair.assetA || "").trim().toUpperCase();
+  var assetB = String(pair.assetB || "").trim().toUpperCase();
+  var portfolio = String(pair.portfolio || "").trim();
+  
+  if (!portfolio) throw new Error("Portfolio is required.");
+  if (!assetA || !assetB) throw new Error("Asset A and Asset B are required.");
+  if (assetA === assetB) throw new Error("Asset A and Asset B cannot be the same asset.");
+  
+  var targetA = parseFloat(pair.targetA);
+  if (isNaN(targetA) || targetA < 1 || targetA > 99) throw new Error("Target A % must be between 1 and 99.");
+  var targetB = 100 - targetA;
+  
+  var mode = String(pair.mode || "Drift");
+  if (["Drift", "Schedule", "Manual"].indexOf(mode) === -1) throw new Error("Invalid Trigger Mode.");
+  
+  var driftThreshold = parseFloat(pair.driftThreshold) || 5;
+  if (mode === "Drift" && driftThreshold <= 0) throw new Error("Drift Threshold must be greater than 0.");
+  
+  if (mode === "Schedule") {
+    if (!pair.scheduleFrequency) throw new Error("Schedule Frequency is required for Schedule mode.");
+    if (!pair.scheduleAnchor) throw new Error("Schedule Anchor date is required for Schedule mode.");
+  }
+  
+  var existingRow = -1;
+  for (var r = 1; r < pRows.length; r++) {
+    var rId = String(pRows[r][pIdCol] || "");
+    if (pair.pairId && rId === String(pair.pairId)) {
+      existingRow = r + 1;
+      continue;
+    }
+    // Check duplicate pair in same portfolio
+    var rPort = String(pRows[r][portCol] || "");
+    var rA = String(pRows[r][aCol] || "").toUpperCase();
+    var rB = String(pRows[r][bCol] || "").toUpperCase();
+    if (rPort === portfolio && ((rA === assetA && rB === assetB) || (rA === assetB && rB === assetA))) {
+      throw new Error("A pair with these assets already exists in portfolio '" + portfolio + "'.");
+    }
+  }
+  
+  var pairId = pair.pairId || nextId("RP");
+  var pairName = pair.pairName || (assetA + " vs " + assetB);
+  var customFee = pair.customFee === true || String(pair.customFee).toUpperCase() === "TRUE";
+  var feeAMode = String(pair.feeAMode || "percent");
+  var feeAValue = parseFloat(pair.feeAValue) || 0;
+  var feeBMode = String(pair.feeBMode || "percent");
+  var feeBValue = parseFloat(pair.feeBValue) || 0;
+  var status = String(pair.status || "Active");
+  var created = pair.created || new Date().toISOString();
+  
+  var rowVals = new Array(pH.length).fill("");
+  function setVal(name, val) {
+    var idx = pH.indexOf(name.toLowerCase());
+    if (idx !== -1) rowVals[idx] = val;
+  }
+  
+  setVal("Pair ID", pairId);
+  setVal("Portfolio", portfolio);
+  setVal("Pair Name", pairName);
+  setVal("Asset A", assetA);
+  setVal("Asset A Type", pair.assetAType || "Crypto");
+  setVal("Asset A Currency", pair.assetACurrency || "USD");
+  setVal("Target A %", targetA);
+  setVal("Asset B", assetB);
+  setVal("Asset B Type", pair.assetBType || "Crypto Short 1x");
+  setVal("Asset B Currency", pair.assetBCurrency || "USD");
+  setVal("Target B %", targetB);
+  setVal("Trigger Mode", mode);
+  setVal("Drift Threshold %", driftThreshold);
+  setVal("Schedule Frequency", pair.scheduleFrequency || "Monthly");
+  setVal("Schedule Anchor", pair.scheduleAnchor || "");
+  setVal("Last Rebalanced", pair.lastRebalanced || "");
+  setVal("Custom Fee", customFee);
+  setVal("Fee A Mode", feeAMode);
+  setVal("Fee A Value", feeAValue);
+  setVal("Fee B Mode", feeBMode);
+  setVal("Fee B Value", feeBValue);
+  setVal("Status", status);
+  setVal("Created", created);
+  setVal("Notes", pair.notes || "");
+  
+  if (existingRow !== -1) {
+    pairsSheet.getRange(existingRow, 1, 1, rowVals.length).setValues([rowVals]);
+  } else {
+    var nextRow = pairsSheet.getLastRow() + 1;
+    pairsSheet.getRange(nextRow, 1, 1, rowVals.length).setValues([rowVals]);
+  }
+  
+  return { success: true, pairId: pairId };
+}
+
+function setPairStatus(pairId, status) {
+  ensureTableStructure();
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("Rebalance_Pairs");
+  var rows = sheet.getDataRange().getValues();
+  var pH = rows[0].map(function(h) { return h.toString().toLowerCase().trim(); });
+  var idCol = pH.indexOf("pair id");
+  var statusCol = pH.indexOf("status");
+  
+  for (var r = 1; r < rows.length; r++) {
+    if (String(rows[r][idCol]) === String(pairId)) {
+      sheet.getRange(r + 1, statusCol + 1).setValue(status);
+      return { success: true };
+    }
+  }
+  return { success: false, error: "Pair ID not found: " + pairId };
+}
+
+function deletePair(pairId) {
+  ensureTableStructure();
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("Rebalance_Pairs");
+  var rows = sheet.getDataRange().getValues();
+  var pH = rows[0].map(function(h) { return h.toString().toLowerCase().trim(); });
+  var idCol = pH.indexOf("pair id");
+  
+  for (var r = 1; r < rows.length; r++) {
+    if (String(rows[r][idCol]) === String(pairId)) {
+      sheet.deleteRow(r + 1);
+      return { success: true };
+    }
+  }
+  return { success: false, error: "Pair ID not found: " + pairId };
+}
+
+function executeRebalance(rebalance) {
+  var lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(20000);
+  } catch (e) {
+    return { success: false, error: "Server busy. Please try again." };
+  }
+  
+  ensureTableStructure();
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var journalSheet = ss.getSheetByName("Journal");
+  var pairsSheet = ss.getSheetByName("Rebalance_Pairs");
+  var logSheet = ss.getSheetByName("Rebalance_Log");
+  
+  if (!pairsSheet || !journalSheet || !logSheet) {
+    lock.releaseLock();
+    return { success: false, error: "Required sheets missing." };
+  }
+  
+  var pRows = pairsSheet.getDataRange().getValues();
+  var pH = pRows[0].map(function(h) { return h.toString().toLowerCase().trim(); });
+  var pIdIdx = pH.indexOf("pair id");
+  var portIdx = pH.indexOf("portfolio");
+  var pNameIdx = pH.indexOf("pair name");
+  var aIdx = pH.indexOf("asset a");
+  var bIdx = pH.indexOf("asset b");
+  var statusIdx = pH.indexOf("status");
+  var lastRebIdx = pH.indexOf("last rebalanced");
+  
+  var pairRow = -1;
+  var targetPair = null;
+  for (var r = 1; r < pRows.length; r++) {
+    if (String(pRows[r][pIdIdx]) === String(rebalance.pairId)) {
+      pairRow = r + 1;
+      targetPair = pRows[r];
+      break;
+    }
+  }
+  
+  if (pairRow === -1) {
+    lock.releaseLock();
+    return { success: false, error: "Pair not found: " + rebalance.pairId };
+  }
+  
+  var pairStatus = String(targetPair[statusIdx] || "");
+  if (pairStatus !== "Active") {
+    lock.releaseLock();
+    return { success: false, error: "Pair is not Active: " + pairStatus };
+  }
+  
+  var pairPort = String(targetPair[portIdx] || "");
+  if (rebalance.portfolio !== pairPort) {
+    lock.releaseLock();
+    return { success: false, error: "Cross-portfolio rebalancing forbidden. Expected: " + pairPort + ", got: " + rebalance.portfolio };
+  }
+  
+  var assetA = String(targetPair[aIdx] || "").toUpperCase();
+  var assetB = String(targetPair[bIdx] || "").toUpperCase();
+  var sellAsset = String(rebalance.sell.assetName || "").toUpperCase();
+  var buyAsset = String(rebalance.buy.assetName || "").toUpperCase();
+  
+  if (!((sellAsset === assetA && buyAsset === assetB) || (sellAsset === assetB && buyAsset === assetA))) {
+    lock.releaseLock();
+    return { success: false, error: "Rebalance assets do not match pair: " + sellAsset + " -> " + buyAsset };
+  }
+  
+  var heldQty = getHeldQty(pairPort, sellAsset);
+  var sellQty = parseFloat(rebalance.sell.quantity) || 0;
+  if (sellQty <= 0) {
+    lock.releaseLock();
+    return { success: false, error: "Sell quantity must be greater than 0." };
+  }
+  if (sellQty > heldQty + 1e-7) {
+    lock.releaseLock();
+    return { success: false, error: "Insufficient held quantity. Holding: " + heldQty + ", requested sell: " + sellQty };
+  }
+  
+  var buyQty = parseFloat(rebalance.buy.quantity) || 0;
+  if (buyQty <= 0) {
+    lock.releaseLock();
+    return { success: false, error: "Buy quantity must be greater than 0." };
+  }
+  
+  var rbId = nextId("RB");
+  var pairName = String(targetPair[pNameIdx] || "");
+  
+  var sellTrade = Object.assign({}, rebalance.sell, {
+    portfolio: pairPort,
+    date: rebalance.date,
+    action: "Sell",
+    why: "Rebalance " + pairName,
+    remark: rebalance.reason || ("Rebalance " + rbId),
+    rebalanceId: rbId
+  });
+  
+  var buyTrade = Object.assign({}, rebalance.buy, {
+    portfolio: pairPort,
+    date: rebalance.date,
+    action: "Buy",
+    why: "Rebalance " + pairName,
+    remark: rebalance.reason || ("Rebalance " + rbId),
+    rebalanceId: rbId
+  });
+  
+  var addedRowIndices = [];
+  try {
+    var jLastCol = journalSheet.getLastColumn();
+    var jHeaders = journalSheet.getRange(1, 1, 1, jLastCol).getValues()[0];
+    
+    // Add Sell row
+    var sellRowIdx = journalSheet.getLastRow() + 1;
+    var sellRowVals = buildJournalRow(jHeaders, sellRowIdx, sellTrade);
+    journalSheet.getRange(sellRowIdx, 1, 1, sellRowVals.length).setValues([sellRowVals]);
+    addedRowIndices.push(sellRowIdx);
+    
+    // Add Buy row
+    var buyRowIdx = journalSheet.getLastRow() + 1;
+    var buyRowVals = buildJournalRow(jHeaders, buyRowIdx, buyTrade);
+    journalSheet.getRange(buyRowIdx, 1, 1, buyRowVals.length).setValues([buyRowVals]);
+    addedRowIndices.push(buyRowIdx);
+    
+    // Append to Rebalance_Log
+    var logHeaders = logSheet.getRange(1, 1, 1, logSheet.getLastColumn()).getValues()[0];
+    var logHeadersLower = logHeaders.map(function(h) { return h.toString().toLowerCase().trim(); });
+    var logRowVals = new Array(logHeaders.length).fill("");
+    
+    function setLogVal(name, val) {
+      var idx = logHeadersLower.indexOf(name.toLowerCase());
+      if (idx !== -1) logRowVals[idx] = val;
+    }
+    
+    var snap = rebalance.snapshot || {};
+    setLogVal("Rebalance ID", rbId);
+    setLogVal("Pair ID", rebalance.pairId);
+    setLogVal("Portfolio", pairPort);
+    setLogVal("Executed On", rebalance.date);
+    setLogVal("Trigger", rebalance.trigger || "Manual");
+    setLogVal("Sell Asset", sellAsset);
+    setLogVal("Sell Qty", sellQty);
+    setLogVal("Sell Price", parseFloat(rebalance.sell.priceUnit) || 0);
+    setLogVal("Sell Fee", parseFloat(rebalance.sell.feeAmount) || 0);
+    setLogVal("Buy Asset", buyAsset);
+    setLogVal("Buy Qty", buyQty);
+    setLogVal("Buy Price", parseFloat(rebalance.buy.priceUnit) || 0);
+    setLogVal("Buy Fee", parseFloat(rebalance.buy.feeAmount) || 0);
+    setLogVal("Value Moved THB", parseFloat(snap.valueMovedTHB) || 0);
+    setLogVal("Before A %", parseFloat(snap.beforePctA) || 0);
+    setLogVal("Target A %", parseFloat(snap.targetPctA) || 0);
+    setLogVal("After A %", parseFloat(snap.afterPctA) || 0);
+    setLogVal("Realized PnL THB", parseFloat(snap.realizedPnLTHB) || 0);
+    setLogVal("Reason", rebalance.reason || "");
+    setLogVal("Status", "Done");
+    setLogVal("Created", new Date().toISOString());
+    
+    var logNextRow = logSheet.getLastRow() + 1;
+    logSheet.getRange(logNextRow, 1, 1, logRowVals.length).setValues([logRowVals]);
+    
+    // Update Last Rebalanced in Rebalance_Pairs
+    if (lastRebIdx !== -1) {
+      pairsSheet.getRange(pairRow, lastRebIdx + 1).setValue(rebalance.date);
+    }
+  } catch (err) {
+    for (var k = addedRowIndices.length - 1; k >= 0; k--) {
+      try {
+        journalSheet.deleteRow(addedRowIndices[k]);
+      } catch (e2) {}
+    }
+    lock.releaseLock();
+    return { success: false, error: "Execution failed: " + err.toString() };
+  }
+  
+  lock.releaseLock();
+  return { success: true, rebalanceId: rbId };
+}
+
+function revertRebalance(rebalanceId) {
+  var lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(20000);
+  } catch (e) {
+    return { success: false, error: "Server busy. Please try again." };
+  }
+  
+  ensureTableStructure();
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var journalSheet = ss.getSheetByName("Journal");
+  var logSheet = ss.getSheetByName("Rebalance_Log");
+  var pairsSheet = ss.getSheetByName("Rebalance_Pairs");
+  
+  if (!logSheet || !journalSheet || !pairsSheet) {
+    lock.releaseLock();
+    return { success: false, error: "Required sheets missing." };
+  }
+  
+  var lRows = logSheet.getDataRange().getValues();
+  var lH = lRows[0].map(function(h) { return h.toString().toLowerCase().trim(); });
+  var rbIdCol = lH.indexOf("rebalance id");
+  var pIdCol = lH.indexOf("pair id");
+  var statCol = lH.indexOf("status");
+  var execDateCol = lH.indexOf("executed on");
+  
+  var targetLogRow = -1;
+  var pairId = "";
+  for (var r = 1; r < lRows.length; r++) {
+    if (String(lRows[r][rbIdCol]) === String(rebalanceId)) {
+      targetLogRow = r + 1;
+      pairId = String(lRows[r][pIdCol] || "");
+      break;
+    }
+  }
+  
+  if (targetLogRow === -1) {
+    lock.releaseLock();
+    return { success: false, error: "Rebalance ID not found in Log: " + rebalanceId };
+  }
+  
+  var jRows = journalSheet.getDataRange().getValues();
+  var jH = jRows[0].map(function(h) { return h.toString().toLowerCase().trim(); });
+  var jRbCol = jH.indexOf("rebalance id");
+  
+  var matchedRows = [];
+  if (jRbCol !== -1) {
+    for (var i = 1; i < jRows.length; i++) {
+      if (String(jRows[i][jRbCol]) === String(rebalanceId)) {
+        matchedRows.push(i + 1);
+      }
+    }
+  }
+  
+  // Delete rows from bottom to top
+  matchedRows.sort(function(a, b) { return b - a; });
+  for (var m = 0; m < matchedRows.length; m++) {
+    journalSheet.deleteRow(matchedRows[m]);
+  }
+  
+  if (statCol !== -1) {
+    logSheet.getRange(targetLogRow, statCol + 1).setValue("Reverted");
+  }
+  
+  // Recalculate Last Rebalanced for this pair
+  if (pairId) {
+    var refreshedLogs = logSheet.getDataRange().getValues();
+    var latestDate = "";
+    for (var l = 1; l < refreshedLogs.length; l++) {
+      if (String(refreshedLogs[l][pIdCol]) === pairId && String(refreshedLogs[l][statCol]) === "Done") {
+        var ed = String(refreshedLogs[l][execDateCol] || "");
+        if (ed > latestDate) latestDate = ed;
+      }
+    }
+    
+    var pRows = pairsSheet.getDataRange().getValues();
+    var pH = pRows[0].map(function(h) { return h.toString().toLowerCase().trim(); });
+    var pIdIdx = pH.indexOf("pair id");
+    var lastRebIdx = pH.indexOf("last rebalanced");
+    if (pIdIdx !== -1 && lastRebIdx !== -1) {
+      for (var pr = 1; pr < pRows.length; pr++) {
+        if (String(pRows[pr][pIdIdx]) === pairId) {
+          pairsSheet.getRange(pr + 1, lastRebIdx + 1).setValue(latestDate);
+          break;
+        }
+      }
+    }
+  }
+  
+  lock.releaseLock();
+  return { success: true };
 }

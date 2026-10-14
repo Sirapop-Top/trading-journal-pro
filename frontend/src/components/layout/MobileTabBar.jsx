@@ -2,12 +2,14 @@ import {
   DashboardOutlined,
   BookOutlined,
   TableOutlined,
+  SwapOutlined,
   SettingOutlined
 } from '@ant-design/icons';
+import { Badge } from 'antd';
 import { useAppData } from '../../context/AppDataContext.jsx';
 
 export const MobileTabBar = () => {
-  const { isMobile, activeTab, setActiveTab } = useAppData();
+  const { isMobile, activeTab, setActiveTab, dueCount } = useAppData();
 
   if (!isMobile) return null;
 
@@ -33,6 +35,15 @@ export const MobileTabBar = () => {
       >
         <TableOutlined className="mobile-tabbar-icon" />
         <span>Positions</span>
+      </button>
+      <button 
+        className={`mobile-tabbar-item ${activeTab === 'rebalance' ? 'active' : ''}`}
+        onClick={() => setActiveTab('rebalance')}
+      >
+        <Badge count={dueCount} size="small" offset={[6, -2]}>
+          <SwapOutlined className="mobile-tabbar-icon" />
+        </Badge>
+        <span>Rebalance</span>
       </button>
       <button 
         className={`mobile-tabbar-item ${activeTab === 'settings' ? 'active' : ''}`}

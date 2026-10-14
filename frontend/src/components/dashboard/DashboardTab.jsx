@@ -1,4 +1,4 @@
-import { Space, Row, Col, Card, Table, Tag } from 'antd';
+import { Space, Row, Col, Card, Table, Tag, Alert, Button } from 'antd';
 import { useAppData } from '../../context/AppDataContext.jsx';
 import { MobileDashboard } from './MobileDashboard.jsx';
 import { KpiCards } from './KpiCards.jsx';
@@ -15,7 +15,9 @@ export const DashboardTab = () => {
     kpis,
     isCensored,
     formatCurrency,
-    displayCurrency
+    displayCurrency,
+    dueCount,
+    setActiveTab
   } = useAppData();
 
   if (isMobile) {
@@ -123,6 +125,23 @@ export const DashboardTab = () => {
 
   return (
     <Space direction="vertical" size="large" style={{ width: '100%' }}>
+      {dueCount > 0 && (
+        <Alert
+          message={<strong>Rebalance Action Required</strong>}
+          description={
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+              <span>You have <strong>{dueCount}</strong> pair{dueCount > 1 ? 's' : ''} with target drift or scheduled date due.</span>
+              <Button type="primary" size="small" onClick={() => setActiveTab('rebalance')} style={{ background: '#ef4444', borderColor: '#ef4444' }}>
+                Go to Rebalance Hub &rarr;
+              </Button>
+            </div>
+          }
+          type="error"
+          showIcon
+          style={{ background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.3)' }}
+        />
+      )}
+
       {/* HERO GRID SECTION */}
       <KpiCards />
 

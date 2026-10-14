@@ -26,3 +26,14 @@ export const STANDARD_STRATEGIES = [
   'Support/Resistance Bounce',
   'Rebalance'
 ];
+
+export const formatCurrency = (val, currencyCode = 'THB', isCensored = false) => {
+  if (val === undefined || val === null || isNaN(Number(val))) return '-';
+  const symbol = CURRENCY_SYMBOLS[currencyCode] || currencyCode || '';
+  if (isCensored) return `${symbol} ****`;
+  const formattedNum = Number(val).toLocaleString(undefined, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  });
+  return `${symbol} ${formattedNum}`.trim();
+};
