@@ -104,6 +104,43 @@ Traders need metrics that help them evaluate edge. The top of the **Dashboard** 
 * **Avg Win / Avg Loss:** Converted average values of winning and losing trades.
 * **Max Win / Max Loss:** The largest closed-out winning and losing trades in your log history.
 
+### ⚖️ Dual-Asset Rebalance Hub
+Automate portfolio weight maintenance between two assets within the same portfolio:
+1. Navigate to the **Rebalance** tab.
+2. Click **Create Rebalance Pair**:
+   * **Scope:** Pair two assets residing in the same portfolio (cross-portfolio pairing is strictly disallowed).
+   * **Trigger Mode:** Choose between **Drift** (triggers when asset weight drifts beyond threshold, e.g. ±5%), **Schedule** (triggers periodically: Weekly, Bi-weekly, Monthly, or Quarterly), or **Manual**.
+   * **Target Ratio:** Set target weights (e.g. 50% Asset A : 50% Asset B).
+   * **BTC vs Inverse Short BTC 1x:** Supports pairing `BTC-USD` with Spot inverse ETFs (`BITI`) or Synthetic 1x short positions (`BTC-USD:S1X`). Synthetic 1x short calculates unit equity dynamically as `2 × Entry Price − Current Price`.
+   * **Flexible Fee Options:** Set fee rates per-pair or use terminal defaults.
+3. **Execute Rebalance:** When triggered, the Calculator determines exact buy/sell units. Clicking **Execute Rebalance** atomicly logs both transactions to the Trading Journal with a unified `rebalanceId`.
+4. **Audit & Revert:** Review execution logs in the Rebalance History table. Clicking **Revert** removes both journal trades and resets status cleanly.
+
+### 💵 Cash Ledger & Income Accounting
+Manage multi-currency liquid cash, dividends, and interest separately from asset positions:
+1. Navigate to the **Cash & Income** tab.
+2. Click **Record Cash Entry**:
+   * **Transaction Types:** Deposit, Withdraw, Dividend, Interest, Fee, Tax.
+   * **Auto WHT:** Thai stock dividends automatically calculate 10% Withholding Tax with customizable override.
+   * **FX Rates:** Records trade-date exchange rates for accurate multi-currency statement conversion.
+3. **Statement & Balance:** View running cash balance, net deposits, YTD dividends, and full account statements.
+
+### 📊 Deep-Dive Analytics & Reports
+Evaluate equity curve, drawdown, and tax filings in the **Analytics & Reports** tab:
+* **Global Date Range:** Use the header period selector (`All Time`, `YTD`, `1 Year`, `3 Years`, or `Custom Range`) to slice realized statistics and curves while keeping cumulative positions intact.
+* **Equity Curve & Max Drawdown:** Track daily Net Asset Value (NAV), peak equity, drawdown percentages, and longest drawdown duration.
+* **Benchmark Comparison:** Compare portfolio equity growth against normalized indices (`^SET.BK`, `^GSPC`, `BTC-USD`).
+* **Monthly Heatmap:** Year × Month interactive matrix of realized capital gains and net dividends.
+* **Strategy Expectancy:** Performance metrics broken down by trading strategy (win rate, profit factor, payoff ratio).
+* **Annual Tax Report:** Detailed summary of annual realized gains, dividends, and withholding tax for tax filing.
+
+### 📥 CSV Import & Export
+* **Export CSV (with UTF-8 BOM):** Download Journal, Cash Statement, Rebalance History, or Tax Summary CSVs with UTF-8 BOM (`\uFEFF`) ensuring Thai text opens without encoding corruption in Microsoft Excel.
+* **CSV Import Wizard:** Multi-step wizard to import trade archives from brokers (Streaming, InnovestX, Binance, TradingView). Features automatic column mapping, persistent mapping memory, duplicate detection signatures, and atomic batch sync.
+
+### 📱 Progressive Web App (PWA) & Offline Access
+AlphaTrader can be installed directly to your home screen or desktop via Chrome/Safari PWA prompts. Static shell assets are cached locally with background service workers, providing offline view capabilities with an informative connectivity status banner.
+
 ---
 
 ## 🛠️ Troubleshooting & Frequently Asked Questions

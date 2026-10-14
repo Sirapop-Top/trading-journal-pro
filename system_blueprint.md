@@ -39,20 +39,50 @@ Trading Journal_pro/
 ├── .github/workflows/
 │   └── deploy.yml              # GitHub Actions pipeline to compile & deploy frontend to GitHub Pages
 │
+├── apps-script/
+│   └── Code.gs                 # Master Google Apps Script backend source (v2.2)
+│
 ├── frontend/
 │   ├── src/
-│   │   ├── App.jsx             # React UI containing the Dashboard, Portfolio Analysis, and Settings panels
-│   │   ├── App.css             # Main stylesheet customization
-│   │   ├── index.css           # Global design system & style tokens
-│   │   └── main.jsx            # React root mount point
+│   │   ├── api/
+│   │   │   └── sheetsClient.js # Central API client (gviz CSV + Apps Script Web App actions)
+│   │   ├── components/
+│   │   │   ├── analytics/      # MonthlyHeatmap, EquityDrawdownChart, StrategyStats, TaxReport
+│   │   │   ├── cash/           # CashTab, CashStatementTable, CashEntryModal
+│   │   │   ├── dashboard/      # KPI cards, allocation & cumulative return charts
+│   │   │   ├── journal/        # JournalTab, MobileJournalFeed
+│   │   │   ├── layout/         # AppHeader, AppSider, MobileTabBar
+│   │   │   ├── modals/         # LogTradeModal, EditStrategyModal, CsvImportModal, PortfolioModals
+│   │   │   ├── positions/      # PositionsTab (Holdings, WAC, Target weights)
+│   │   │   ├── rebalance/      # RebalanceTab, RebalancePairsGrid, RebalanceCalculator, RebalanceHistory
+│   │   │   └── settings/       # SettingsTab (Passcode, Portfolios, Ticker auto-complete)
+│   │   ├── context/
+│   │   │   └── AppDataContext.jsx # Unified React context provider (state & derived data)
+│   │   ├── hooks/
+│   │   │   ├── useJournalData.js
+│   │   │   ├── usePortfolioDerived.js
+│   │   │   ├── useRebalanceData.js
+│   │   │   ├── useTradeActions.js
+│   │   │   └── usePasscodeSecurity.js
+│   │   ├── lib/
+│   │   │   ├── analyticsEngine.js # NAV timeline, Peak NAV, Max Drawdown, Monthly Heatmap, Benchmarks
+│   │   │   ├── cashEngine.js      # Cash ledger, running statement, dividend & interest accounting
+│   │   │   ├── csvHelper.js       # UTF-8 BOM CSV export & multi-format CSV import parser
+│   │   │   ├── portfolioEngine.js # WAC calculations, asset allocation, realized/unrealized P&L
+│   │   │   ├── rebalanceEngine.js # Dual-asset drift, schedule, manual, & BTC Short 1x simulator
+│   │   │   ├── security.js        # PBKDF2/SHA-256 passcode hashing & verification
+│   │   │   └── constants.js       # App configuration tokens & currency formatting
+│   │   ├── App.jsx                # Clean orchestrator layout with tab router & security guards
+│   │   ├── index.css              # Global design system & style tokens
+│   │   └── main.jsx               # React root mount point
 │   │
-│   ├── index.html              # Static HTML shell
-│   ├── vite.config.js          # Vite config (set to base: './' for GitHub Pages compatibility)
-│   └── package.json            # Node.js dependencies
+│   ├── index.html                 # Static HTML shell
+│   ├── vite.config.js             # Vite + VitePWA config (base: './', NetworkOnly cache rules)
+│   └── package.json               # Node.js dependencies
 │
-├── .gitignore                  # Prevents private trade config caches from leaking to GitHub
-├── USER_MANUAL.md              # Operations manual and guide
-├── system_blueprint.md         # This document
+├── demo/                          # Sandbox rebalance engine simulator & standalone HTML demo
+├── USER_MANUAL.md                 # Operations manual and guide
+├── system_blueprint.md            # This document
 └── github_sheets_serverless_deployment_guide.md # Google Apps Script & Sheets setup instructions
 ```
 
