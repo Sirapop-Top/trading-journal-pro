@@ -7,7 +7,8 @@ import {
   computeTradingAnalytics,
   computePortfolioSizing,
   computeCumulativeRealized,
-  computePnlByDimension
+  computePnlByDimension,
+  resolveLivePrice
 } from '../portfolioEngine.js';
 
 describe('portfolioEngine core WAC calculations', () => {
@@ -210,5 +211,70 @@ describe('portfolioEngine core WAC calculations', () => {
     const dimension = computePnlByDimension(trades, {}, liveRates, 'THB', 'name', 'realized', positions);
     expect(dimension[0].PnL).toBe(3650);
   });
+
+  describe('resolveLivePrice and unpriced position handling', () => {
+    it('resolves prices across different ticker formats and casing', () => {
+      const prices = {
+        'BJC.BK': 18.1,
+        'KCE': 75.5,
+        'BTCUSDT': 68000,
+        'ETH-USD': 3500,
+        'MSTR': 143.24
+      };
+
+      expect(resolveLivePrice('BJC', prices, null)).toBe(18.1);
+      expect(resolveLivePrice('bjc', prices, null)).toBe(18.1);
+      expect(resolveLivePrice('KCE.BK', prices, null)).toBe(75.5);
+      expect(resolveLivePrice('kce', prices, null)).toBe(75.5);
+      expect(resolveLivePrice('BTC', prices, null)).toBe(68000);
+      expect(resolveLivePrice('ETH', prices, null)).toBe(3500);
+      expect(resolveLivePrice('MSTR', prices, null)).toBe(143.24);
+      expect(resolveLivePrice('UNKNOWN', prices, null)).toBe(null);
+      expect(resolveLivePrice('UNKNOWN', prices, 100)).toBe(100);
+    });
+
+    it('marks positions as hasLivePrice: false and unrealizedPnL: 0 when live price is missing', () => {
+      const trades = [
+        { id: '1', date: '2026-06-01', assetName: 'BJC', action: 'Buy', quantity: 1000, priceUnit: 15.6, feeAmount: 0, currency: 'THB' },
+        { id: '2', date: '2026-06-02', assetName: 'KCE', action: 'Buy', quantity: 500, priceUnit: 19.0, feeAmount: 0, currency: 'THB' }
+      ];
+
+      // Only BJC has live price, KCE is missing
+      const livePrices = { BJC: 18.0 };
+      const positions = computePositions(trades, livePrices, { THB: 1 }, 'THB');
+
+      const bjc = positions.find(p => p.assetName === 'BJC');
+      const kce = positions.find(p => p.assetName === 'KCE');
+
+      expect(bjc.hasLivePrice).toBe(true);
+      expect(bjc.livePrice).toBe(18.0);
+      expect(bjc.unrealizedPnL).toBe(1000 * 18.0 - 15600); // +2400
+
+      expect(kce.hasLivePrice).toBe(false);
+      expect(kce.livePrice).toBe(19.0); // WAC fallback for conservative NAV
+      expect(kce.unrealizedPnL).toBe(0); // Never show artificial 0 P&L as profit
+
+      const kpis = computeKpis(positions);
+      expect(kpis.unpricedHoldingsCount).toBe(1);
+      expect(kpis.allHoldingsPriced).toBe(false);
+      expect(kpis.totalUnrealizedPnLConverted).toBe(2400);
+    });
+
+    it('sets allHoldingsPriced: true when all holdings have valid live prices', () => {
+      const trades = [
+        { id: '1', date: '2026-06-01', assetName: 'BJC', action: 'Buy', quantity: 1000, priceUnit: 15.6, feeAmount: 0, currency: 'THB' },
+        { id: '2', date: '2026-06-02', assetName: 'KCE', action: 'Buy', quantity: 500, priceUnit: 19.0, feeAmount: 0, currency: 'THB' }
+      ];
+
+      const livePrices = { BJC: 18.0, KCE: 22.0 };
+      const positions = computePositions(trades, livePrices, { THB: 1 }, 'THB');
+      const kpis = computeKpis(positions);
+
+      expect(kpis.unpricedHoldingsCount).toBe(0);
+      expect(kpis.allHoldingsPriced).toBe(true);
+      expect(kpis.totalUnrealizedPnLConverted).toBe((18000 - 15600) + (11000 - 9500)); // 2400 + 1500 = 3900
+    });
+  });
 });
+
 

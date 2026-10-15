@@ -16,7 +16,6 @@ export const PositionsTab = () => {
     kpis,
     isCensored,
     formatCurrency,
-    livePrices,
     displayCurrency
   } = useAppData();
 
@@ -106,7 +105,7 @@ export const PositionsTab = () => {
       align: 'right',
       width: 140,
       className: 'financial-num',
-      render: (val) => formatCurrency(val, displayCurrency)
+      render: (val, record) => (record.hasLivePrice || record.qtyHeld === 0) ? formatCurrency(val, displayCurrency) : <span style={{ color: 'var(--text-muted)' }}>—</span>
     },
     {
       title: `Current Value (${displayCurrency})`,
@@ -125,6 +124,9 @@ export const PositionsTab = () => {
       className: 'financial-num',
       sorter: (a, b) => a.unrealizedPnLConverted - b.unrealizedPnLConverted,
       render: (_, record) => {
+        if (!record.hasLivePrice && record.qtyHeld > 0) {
+          return <span style={{ color: 'var(--text-muted)' }}>— <Tag color="warning" style={{ fontSize: '10px', marginLeft: 4 }}>Unpriced</Tag></span>;
+        }
         const val = record.unrealizedPnLConverted;
         const pct = record.unrealizedPnLPct;
         if (val === undefined || val === null || isNaN(val)) return '-';
@@ -238,7 +240,7 @@ export const PositionsTab = () => {
                     <div>
                       <div className="mobile-feed-card-label">Live Price</div>
                       <div className="mobile-feed-card-value financial-num">
-                        {livePrices[pos.assetName] !== undefined ? formatCurrency(livePrices[pos.assetName], pos.currency) : '-'}
+                        {(pos.hasLivePrice || pos.qtyHeld === 0) ? formatCurrency(pos.livePriceConverted, displayCurrency) : <span style={{ color: 'var(--text-muted)' }}>—</span>}
                       </div>
                     </div>
                     <div>
@@ -250,7 +252,13 @@ export const PositionsTab = () => {
                     <div>
                       <div className="mobile-feed-card-label">Unrealized P&L</div>
                       <div className={`mobile-feed-card-value financial-num ${isUnrealizedProfit ? 'trend-up' : 'trend-down'}`}>
-                        {isUnrealizedProfit ? '+' : ''}{isCensored ? '****' : pos.unrealizedPnLConverted.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        {!pos.hasLivePrice && pos.qtyHeld > 0 ? (
+                          <span style={{ color: 'var(--text-muted)' }}>— <Tag color="warning" style={{ fontSize: '10px' }}>Unpriced</Tag></span>
+                        ) : (
+                          <>
+                            {isUnrealizedProfit ? '+' : ''}{isCensored ? '****' : pos.unrealizedPnLConverted.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </>
+                        )}
                       </div>
                     </div>
                     <div>

@@ -85,9 +85,31 @@ export const fetchBinanceCryptoPrices = async (symbols = []) => {
   const prices = {};
   if (!symbols || symbols.length === 0) return prices;
 
+  const validSymbols = symbols.map(s => String(s || '').replace(/:S1X|:SHORT/gi, '').trim().toUpperCase()).filter(Boolean);
+  if (validSymbols.length === 0) return prices;
+
+  const fetchWithTimeout = async (url) => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 5000);
+    try {
+      const res = await fetch(url, { signal: controller.signal });
+      clearTimeout(timer);
+      return res;
+    } catch (e) {
+      clearTimeout(timer);
+      throw e;
+    }
+  };
+
   try {
-    const res = await fetch('https://api.binance.com/api/v3/ticker/price');
-    if (res.ok) {
+    let res;
+    try {
+      res = await fetchWithTimeout('https://api.binance.com/api/v3/ticker/price');
+    } catch {
+      res = await fetchWithTimeout('https://data-api.binance.vision/api/v3/ticker/price');
+    }
+
+    if (res && res.ok) {
       const data = await res.json();
       const tickerMap = {};
       data.forEach(item => {

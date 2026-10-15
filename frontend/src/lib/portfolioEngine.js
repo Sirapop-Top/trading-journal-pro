@@ -284,10 +284,12 @@ export const computePositions = (trades = [], livePrices = {}, liveRates = {}, d
     const wac = qtyHeld > 0 ? (holding.totalCost / qtyHeld) : 0;
     const totalCost = holding.totalCost;
 
-    const livePrice = resolveLivePrice(holding.assetName, livePrices, wac);
+    const rawLivePrice = resolveLivePrice(holding.assetName, livePrices, null);
+    const hasLivePrice = rawLivePrice !== null && !isNaN(rawLivePrice) && rawLivePrice > 0;
+    const livePrice = hasLivePrice ? rawLivePrice : wac;
 
     const liveValue = qtyHeld * livePrice;
-    const unrealizedPnL = liveValue - totalCost;
+    const unrealizedPnL = hasLivePrice ? (liveValue - totalCost) : 0;
     const realizedPnL = holding.totalRealizedPnL;
 
     const rateToTHB = liveRates[holding.currency] || 1.0;
@@ -308,6 +310,7 @@ export const computePositions = (trades = [], livePrices = {}, liveRates = {}, d
       wac,
       totalCost,
       livePrice,
+      hasLivePrice,
       liveValue,
       unrealizedPnL,
       realizedPnL,
@@ -319,7 +322,7 @@ export const computePositions = (trades = [], livePrices = {}, liveRates = {}, d
       realizedPnLConverted,
       totalPnLConverted,
       totalBuyCostConverted,
-      unrealizedPnLPct: totalCost > 0 ? (unrealizedPnL / totalCost) * 100 : 0
+      unrealizedPnLPct: (hasLivePrice && totalCost > 0) ? (unrealizedPnL / totalCost) * 100 : 0
     };
   });
 };
@@ -333,12 +336,19 @@ export const computeKpis = (positions = []) => {
   let totalUnrealizedPnLConverted = 0;
   let totalRealizedPnLConverted = 0;
   let totalBuyCostEverConverted = 0;
+  let unpricedHoldingsCount = 0;
+  let activeHoldingsCount = 0;
 
   positions.forEach(pos => {
     if (pos.qtyHeld > 0) {
+      activeHoldingsCount++;
       totalInvestedConverted += pos.totalCostConverted;
       currentMarketValueConverted += pos.liveValueConverted;
-      totalUnrealizedPnLConverted += pos.unrealizedPnLConverted;
+      if (pos.hasLivePrice !== false) {
+        totalUnrealizedPnLConverted += pos.unrealizedPnLConverted;
+      } else {
+        unpricedHoldingsCount++;
+      }
     }
     totalRealizedPnLConverted += pos.realizedPnLConverted;
     totalBuyCostEverConverted += pos.totalBuyCostConverted || 0;
@@ -347,6 +357,7 @@ export const computeKpis = (positions = []) => {
   const totalPnLConverted = totalUnrealizedPnLConverted + totalRealizedPnLConverted;
   const denominator = totalBuyCostEverConverted > 0 ? totalBuyCostEverConverted : totalInvestedConverted;
   const totalPnLPct = denominator > 0 ? (totalPnLConverted / denominator) * 100 : 0;
+  const allHoldingsPriced = activeHoldingsCount === 0 || unpricedHoldingsCount === 0;
 
   return {
     totalInvestedConverted,
@@ -355,7 +366,9 @@ export const computeKpis = (positions = []) => {
     totalRealizedPnLConverted,
     totalBuyCostEverConverted,
     totalPnLConverted,
-    totalPnLPct
+    totalPnLPct,
+    unpricedHoldingsCount,
+    allHoldingsPriced
   };
 };
 

@@ -11,7 +11,9 @@ export const useJournalData = () => {
   const [livePrices, setLivePrices] = useState(() => {
     if (typeof localStorage === 'undefined') return {};
     try {
-      return JSON.parse(localStorage.getItem('alphatrader_live_prices') || '{}');
+      // Purge old cost-poisoned unversioned cache
+      localStorage.removeItem('alphatrader_live_prices');
+      return JSON.parse(localStorage.getItem('alphatrader_live_prices_v2') || '{}');
     } catch {
       return {};
     }
@@ -80,11 +82,9 @@ export const useJournalData = () => {
     const feeAmountIdx = findColIdx(['fee amount', 'fee_amount', 'fee']);
     const rebalanceIdIdx = findColIdx(['rebalance id', 'rebalance_id']);
     const fxToThbIdx = findColIdx(['fx to thb', 'fx_to_thb', 'fxtothb']);
-    const currentPriceIdx = findColIdx(['current price', 'current_price', 'currentprice', 'market price', 'live price']);
 
     const loadedTrades = [];
     const loadedPortfolios = new Set();
-    const sheetPrices = {};
 
     // Fetch Portfolios config sheet if it exists
     let customMappings = {};
@@ -203,44 +203,36 @@ export const useJournalData = () => {
         fxToThb: fxToThbIdx !== -1 && row[fxToThbIdx] !== '' && !isNaN(parseFloat(row[fxToThbIdx])) ? parseFloat(row[fxToThbIdx]) : null
       });
 
-      if (currentPriceIdx !== -1 && row[currentPriceIdx] !== undefined && row[currentPriceIdx] !== '') {
-        const rawCurrentPrice = row[currentPriceIdx].toString().replace(/[$,฿]/g, '').trim();
-        const parsedCurrentPrice = parseFloat(rawCurrentPrice);
-        if (!isNaN(parsedCurrentPrice) && parsedCurrentPrice > 0) {
-          const upperName = assetName.toUpperCase();
-          const cleanName = upperName.replace(/:S1X|:SHORT/gi, '').trim();
-          sheetPrices[assetName] = parsedCurrentPrice;
-          sheetPrices[upperName] = parsedCurrentPrice;
-          sheetPrices[cleanName] = parsedCurrentPrice;
-          sheetPrices[`${cleanName}:S1X`] = parsedCurrentPrice;
-        }
-      }
-
       loadedPortfolios.add(portfolio);
-    }
-
-    // Direct Binance crypto fetch for held assets
-    const uniqueAssetNames = Array.from(new Set(loadedTrades.map(t => t.assetName).filter(Boolean)));
-    try {
-      const cryptoPrices = await fetchBinanceCryptoPrices(uniqueAssetNames);
-      Object.assign(sheetPrices, cryptoPrices);
-    } catch (cErr) {
-      console.warn('Binance price fetch note in sheet load:', cErr);
-    }
-
-    if (Object.keys(sheetPrices).length > 0) {
-      setLivePrices(prev => {
-        const merged = { ...prev, ...sheetPrices };
-        try {
-          localStorage.setItem('alphatrader_live_prices', JSON.stringify(merged));
-        } catch {}
-        return merged;
-      });
     }
 
     setTrades(loadedTrades);
     setPortfolios(Array.from(loadedPortfolios));
     setGoogleSheetSyncCount(loadedTrades.length);
+
+    // Direct Binance crypto fetch only for crypto assets
+    const cryptoSymbols = Array.from(new Set(
+      loadedTrades
+        .filter(t => (t.assetType || '').toLowerCase().includes('crypto'))
+        .map(t => t.assetName)
+        .filter(Boolean)
+    ));
+    if (cryptoSymbols.length > 0) {
+      try {
+        const cryptoPrices = await fetchBinanceCryptoPrices(cryptoSymbols);
+        if (Object.keys(cryptoPrices).length > 0) {
+          setLivePrices(prev => {
+            const merged = { ...prev, ...cryptoPrices };
+            try {
+              localStorage.setItem('alphatrader_live_prices_v2', JSON.stringify(merged));
+            } catch {}
+            return merged;
+          });
+        }
+      } catch (cErr) {
+        console.warn('Binance price fetch note in sheet load:', cErr);
+      }
+    }
 
     // Fetch Rebalance Pairs
     let loadedPairs = [];
@@ -398,7 +390,7 @@ export const useJournalData = () => {
             setLivePrices(prev => {
               const merged = { ...prev, ...data.livePrices };
               try {
-                localStorage.setItem('alphatrader_live_prices', JSON.stringify(merged));
+                localStorage.setItem('alphatrader_live_prices_v2', JSON.stringify(merged));
               } catch {}
               return merged;
             });
@@ -430,13 +422,20 @@ export const useJournalData = () => {
     if (!silent) setIsSyncing(true);
     let updatedCount = 0;
     try {
-      // 1. Direct client-side Binance crypto fetch for held assets
-      const assetNames = Array.from(new Set(trades.map(t => t.assetName).filter(Boolean)));
+      // 1. Direct client-side Binance crypto fetch ONLY for Crypto assets
+      const cryptoSymbols = Array.from(new Set(
+        trades
+          .filter(t => (t.assetType || '').toLowerCase().includes('crypto'))
+          .map(t => t.assetName)
+          .filter(Boolean)
+      ));
       let cryptoPrices = {};
-      try {
-        cryptoPrices = await fetchBinanceCryptoPrices(assetNames);
-      } catch (cErr) {
-        console.warn('Direct Binance sync note:', cErr);
+      if (cryptoSymbols.length > 0) {
+        try {
+          cryptoPrices = await fetchBinanceCryptoPrices(cryptoSymbols);
+        } catch (cErr) {
+          console.warn('Direct Binance sync note:', cErr);
+        }
       }
 
       // 2. Fetch from Google Apps Script if URL is configured
@@ -463,7 +462,7 @@ export const useJournalData = () => {
       }
       if (rates) setLiveRates(rates);
 
-      // 4. Merge all prices: script livePrices + cryptoPrices
+      // 4. Merge all prices: script livePrices first, crypto prices only applied to crypto
       const combinedPrices = {
         ...(scriptData && scriptData.livePrices ? scriptData.livePrices : {}),
         ...cryptoPrices
@@ -473,11 +472,16 @@ export const useJournalData = () => {
         setLivePrices(prev => {
           const next = { ...prev, ...combinedPrices };
           try {
-            localStorage.setItem('alphatrader_live_prices', JSON.stringify(next));
+            localStorage.setItem('alphatrader_live_prices_v2', JSON.stringify(next));
           } catch {}
           return next;
         });
-        updatedCount = Object.keys(combinedPrices).length;
+
+        // Distinct asset count updated
+        const baseUpdatedSymbols = new Set(
+          Object.keys(combinedPrices).map(s => s.replace(/:S1X|:SHORT/gi, '').replace(/\.BK$/i, '').trim().toUpperCase())
+        );
+        updatedCount = baseUpdatedSymbols.size;
       }
 
       if (scriptData) {

@@ -144,13 +144,13 @@ export const KpiCards = () => {
                 borderRadius: '6px',
                 fontSize: '11px',
                 fontWeight: 700,
-                background: (kpis?.totalPnLConverted || 0) >= 0 ? 'rgba(16, 185, 129, 0.15)' : 'rgba(244, 63, 94, 0.15)',
-                color: (kpis?.totalPnLConverted || 0) >= 0 ? 'var(--success-color)' : 'var(--danger-color)'
+                background: netProfit >= 0 ? 'rgba(16, 185, 129, 0.15)' : 'rgba(244, 63, 94, 0.15)',
+                color: netProfit >= 0 ? 'var(--success-color)' : 'var(--danger-color)'
               }}>
-                {(kpis?.totalPnLConverted || 0) >= 0 ? '▲ +' : '▼ '}{(kpis?.totalPnLPct || 0).toFixed(2)}%
+                {netProfit >= 0 ? '▲ +' : '▼ '}{netProfitPct.toFixed(2)}%
               </span>
               <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
-                All-time yield
+                vs. Initial Capital
               </span>
             </div>
 
@@ -165,6 +165,11 @@ export const KpiCards = () => {
                 <span style={{ color: 'var(--text-secondary)' }}>
                   Paper: <strong style={{ color: (kpis?.totalUnrealizedPnLConverted || 0) >= 0 ? 'var(--success-color)' : 'var(--danger-color)' }}>
                     {(kpis?.totalUnrealizedPnLConverted || 0) >= 0 ? '+' : ''}{formatCurrency(kpis?.totalUnrealizedPnLConverted)}
+                    {kpis?.unpricedHoldingsCount > 0 && (
+                      <span style={{ fontSize: '10px', color: '#f59e0b', marginLeft: '4px', fontWeight: 500 }}>
+                        ({kpis.unpricedHoldingsCount} unpriced)
+                      </span>
+                    )}
                   </strong>
                 </span>
               </div>
@@ -196,6 +201,11 @@ export const KpiCards = () => {
               <span style={{ fontSize: '12px', fontWeight: 700, color: (kpis?.totalUnrealizedPnLConverted || 0) >= 0 ? 'var(--success-color)' : 'var(--danger-color)' }} className="financial-num">
                 {(kpis?.totalUnrealizedPnLConverted || 0) >= 0 ? '+' : ''}{formatCurrency(kpis?.totalUnrealizedPnLConverted)}
               </span>
+              {kpis?.unpricedHoldingsCount > 0 && (
+                <span style={{ fontSize: '10px', color: '#f59e0b', display: 'block' }}>
+                  {kpis.unpricedHoldingsCount} unpriced
+                </span>
+              )}
             </div>
             <div>
               <span style={{ fontSize: '10px', color: 'var(--text-secondary)', textTransform: 'uppercase', display: 'block', fontWeight: 600 }}>Dividends</span>
