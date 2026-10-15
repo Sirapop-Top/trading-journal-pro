@@ -1,9 +1,9 @@
 // ==========================================
 // AlphaTrader — Google Apps Script Backend
-// Schema Version: 2.4 (Observable Price Sync & Safe Fallbacks)
+// Schema Version: 2.5 (Yahoo Finance Live Market Fix & Browser UA)
 // ==========================================
 
-var SCHEMA_VERSION = "2.4";
+var SCHEMA_VERSION = "2.5";
 
 function doGet(e) {
   var action = e ? e.parameter.action : "";
@@ -616,6 +616,7 @@ function getDashboardData() {
   var portfolios = ["Main Trading", "BTC Stock", "Crypto"];
   var uniqueAssets = [];
   var assetTypesMap = {};
+  var assetCurrenciesMap = {};
   var livePrices = {};
   var liveRates = { "THB": 1.0, "USD": 32.69, "EUR": 38.04 };
   
@@ -721,6 +722,7 @@ function getDashboardData() {
       if (uniqueAssets.indexOf(underlyingAsset) === -1) {
         uniqueAssets.push(underlyingAsset);
         assetTypesMap[underlyingAsset] = assetType === "Crypto Short 1x" ? "Crypto" : assetType;
+        assetCurrenciesMap[underlyingAsset] = curVal;
       }
       
       if (portfolio && portfolios.indexOf(portfolio) === -1) {
@@ -836,7 +838,7 @@ function getDashboardData() {
   } catch (e) {}
   
   // Parallel Market Data Fetch
-  var marketData = fetchMarketPrices(uniqueAssets, assetTypesMap);
+  var marketData = fetchMarketPrices(uniqueAssets, assetTypesMap, assetCurrenciesMap);
   livePrices = marketData.livePrices;
   liveRates = marketData.liveRates;
   
@@ -948,14 +950,88 @@ function getDashboardData() {
   }
 }
 
-// Fetch Market Prices from Yahoo Finance (via clean headers & query2 fallback) and Binance
-function fetchMarketPrices(uniqueAssets, assetTypesMap) {
+// Universal Ticker / Market Resolver
+// Maps Thai Stocks to .BK, Crypto to -USD, and Global Stocks to direct US tickers
+function resolveYahooSymbol(assetName, assetType, currency) {
+  var raw = String(assetName || "").trim();
+  if (!raw) return "";
+  
+  var clean = raw.replace(/:S1X|:SHORT/gi, "").trim().toUpperCase();
+  
+  // 1. Direct explicit map for known tickers
+  var tickerMap = {
+    "BJC": "BJC.BK",
+    "KCE": "KCE.BK",
+    "JMART": "JMART.BK",
+    "ROJNA": "ROJNA.BK",
+    "PTG": "PTG.BK",
+    "IVL": "IVL.BK",
+    "LH": "LH.BK",
+    "CPALL": "CPALL.BK",
+    "DELTA": "DELTA.BK",
+    "AOT": "AOT.BK",
+    "PTT": "PTT.BK",
+    "ADVANC": "ADVANC.BK",
+    "BDMS": "BDMS.BK",
+    "GULF": "GULF.BK",
+    "KBANK": "KBANK.BK",
+    "SCB": "SCB.BK",
+    "TRUE": "TRUE.BK",
+    "SCC": "SCC.BK",
+    "MSTR": "MSTR",
+    "CRCL": "CRCL",
+    "META": "META",
+    "HOOD": "HOOD",
+    "AAPL": "AAPL",
+    "NVDA": "NVDA",
+    "TSLA": "TSLA",
+    "MSFT": "MSFT",
+    "GOOGL": "GOOGL",
+    "AMZN": "AMZN"
+  };
+  
+  if (tickerMap[clean]) {
+    return tickerMap[clean];
+  }
+  
+  var typeLower = String(assetType || "").toLowerCase().trim();
+  var curLower = String(currency || "").toLowerCase().trim();
+  
+  // 2. Crypto detection
+  if (typeLower.indexOf("crypto") !== -1 || typeLower.indexOf("เหรียญ") !== -1 || typeLower.indexOf("คริปโต") !== -1) {
+    if (clean.indexOf("-") === -1 && !clean.endsWith("USDT") && !clean.endsWith("USD")) {
+      return clean + "-USD";
+    }
+    return clean;
+  }
+  
+  // 3. Thai stock detection (via assetType OR currency = THB when not explicitly US/Global)
+  var isThai = (
+    typeLower.indexOf("thai") !== -1 ||
+    typeLower.indexOf("set") !== -1 ||
+    typeLower.indexOf("bkk") !== -1 ||
+    typeLower.indexOf("หุ้นไทย") !== -1 ||
+    typeLower === "thai stock" ||
+    (curLower === "thb" && typeLower.indexOf("global") === -1 && typeLower.indexOf("us") === -1)
+  );
+  
+  if (isThai && !clean.endsWith(".BK")) {
+    return clean + ".BK";
+  }
+  
+  // 4. Default: Global Stock (US / International) direct ticker
+  return clean;
+}
+
+// Fetch Market Prices from Yahoo Finance (via browser User-Agent & query2 fallback) and Binance
+function fetchMarketPrices(uniqueAssets, assetTypesMap, assetCurrenciesMap) {
   var livePrices = {};
   var liveRates = { "THB": 1.0, "USD": 32.69, "EUR": 38.04 };
   var priceDiagnostics = {};
 
   try {
     var defaultHeaders = {
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
       "Accept": "application/json"
     };
     var fetchRequests = [];
@@ -975,32 +1051,8 @@ function fetchMarketPrices(uniqueAssets, assetTypesMap) {
     for (var j = 0; j < cleanAssets.length; j++) {
       var asset = cleanAssets[j];
       var type = (assetTypesMap && assetTypesMap[asset]) || "";
-      var symbol = asset;
-      var upperAsset = asset.toUpperCase().trim();
-      var tickerMap = {
-        "BJC": "BJC.BK",
-        "KCE": "KCE.BK",
-        "JMART": "JMART.BK",
-        "ROJNA": "ROJNA.BK",
-        "PTG": "PTG.BK",
-        "IVL": "IVL.BK",
-        "LH": "LH.BK",
-        "MSTR": "MSTR",
-        "CRCL": "CRCL",
-        "META": "META",
-        "HOOD": "HOOD"
-      };
-      
-      if (tickerMap[upperAsset]) {
-        symbol = tickerMap[upperAsset];
-      } else {
-        var typeLower = (type || "").toLowerCase().trim();
-        if (typeLower === "crypto" && upperAsset.indexOf("-") === -1) {
-          symbol = upperAsset + "-USD";
-        } else if (typeLower === "thai stock" && !upperAsset.endsWith(".BK")) {
-          symbol = upperAsset + ".BK";
-        }
-      }
+      var cur = (assetCurrenciesMap && assetCurrenciesMap[asset]) || "";
+      var symbol = resolveYahooSymbol(asset, type, cur);
       resolvedSymbols.push(symbol);
       fetchRequests.push({ url: "https://query1.finance.yahoo.com/v8/finance/chart/" + encodeURIComponent(symbol), headers: defaultHeaders, muteHttpExceptions: true });
     }
@@ -1055,7 +1107,7 @@ function fetchMarketPrices(uniqueAssets, assetTypesMap) {
         errorMsg = parseErr.toString();
       }
 
-      // If query1 failed or returned empty price, attempt query2 fallback
+      // If query1 failed or returned empty price, attempt query2 fallback with browser UA
       if ((price === undefined || price === null || isNaN(price) || price <= 0)) {
         try {
           var q2Resp = UrlFetchApp.fetch("https://query2.finance.yahoo.com/v8/finance/chart/" + encodeURIComponent(sym), { headers: defaultHeaders, muteHttpExceptions: true });
@@ -1075,6 +1127,9 @@ function fetchMarketPrices(uniqueAssets, assetTypesMap) {
         livePrices[asset] = price;
         livePrices[upperAsset] = price;
         livePrices[sym] = price;
+        if (sym.endsWith(".BK")) {
+          livePrices[sym.replace(".BK", "")] = price;
+        }
         livePrices[upperAsset + ":S1X"] = price;
         priceDiagnostics[asset] = { symbol: sym, ok: true, price: price, source: "yahoo", status: status };
       } else {
@@ -1126,6 +1181,7 @@ function fetchMarketPrices(uniqueAssets, assetTypesMap) {
 function getPricesData(symbols) {
   var targetAssets = [];
   var assetTypesMap = {};
+  var assetCurrenciesMap = {};
 
   if (symbols && Array.isArray(symbols) && symbols.length > 0) {
     targetAssets = symbols;
@@ -1137,21 +1193,24 @@ function getPricesData(symbols) {
       var headers = rows[0].map(function(h) { return h.toString().toLowerCase().trim(); });
       var assetIdx = headers.indexOf("asset name");
       var typeIdx = headers.indexOf("asset type");
+      var curIdx = headers.indexOf("currency");
       for (var i = 1; i < rows.length; i++) {
         var name = assetIdx !== -1 ? String(rows[i][assetIdx] || "").trim().toUpperCase() : "";
         var type = typeIdx !== -1 ? String(rows[i][typeIdx] || "").trim() : "";
+        var cur = curIdx !== -1 ? String(rows[i][curIdx] || "").trim() : "";
         if (name) {
           var clean = name.replace(/:S1X|:SHORT/gi, "");
           if (targetAssets.indexOf(clean) === -1) {
             targetAssets.push(clean);
             assetTypesMap[clean] = type;
+            assetCurrenciesMap[clean] = cur;
           }
         }
       }
     }
   }
 
-  var result = fetchMarketPrices(targetAssets, assetTypesMap);
+  var result = fetchMarketPrices(targetAssets, assetTypesMap, assetCurrenciesMap);
   return {
     schemaVersion: SCHEMA_VERSION,
     livePrices: result.livePrices,
@@ -1522,40 +1581,30 @@ function transferPosition(assetName, targetPortfolio) {
 }
 
 function validateTicker(symbol, assetType) {
-  var symbolStripped = symbol.toUpperCase().trim();
+  var symbolStripped = symbol ? symbol.toUpperCase().trim() : "";
   if (!symbolStripped) {
     return { valid: false, message: "Ticker symbol cannot be empty." };
   }
   
-  var resolvedSymbol = symbolStripped;
-  var tickerMap = {
-    "BJC": "BJC.BK",
-    "KCE": "KCE.BK",
-    "JMART": "JMART.BK",
-    "ROJNA": "ROJNA.BK",
-    "MSTR": "MSTR"
+  var resolvedSymbol = resolveYahooSymbol(symbolStripped, assetType, "");
+  var defaultHeaders = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+    "Accept": "application/json"
   };
   
-  if (tickerMap[resolvedSymbol]) {
-    resolvedSymbol = tickerMap[resolvedSymbol];
-  } else {
-    var assetLower = (assetType || "").toLowerCase().trim();
-    if (assetLower === "thai stock" && !resolvedSymbol.endsWith(".BK")) {
-      resolvedSymbol = resolvedSymbol + ".BK";
-    } else if (assetLower === "crypto" && resolvedSymbol.indexOf("-") === -1) {
-      resolvedSymbol = resolvedSymbol + "-USD";
-    }
-  }
-  
   try {
-    var response = UrlFetchApp.fetch("https://query1.finance.yahoo.com/v8/finance/chart/" + resolvedSymbol, { muteHttpExceptions: true });
+    var response = UrlFetchApp.fetch("https://query1.finance.yahoo.com/v8/finance/chart/" + encodeURIComponent(resolvedSymbol), { headers: defaultHeaders, muteHttpExceptions: true });
     var json = JSON.parse(response.getContentText());
-    var price = json.chart.result[0].meta.regularMarketPrice;
+    var meta = json && json.chart && json.chart.result && json.chart.result[0] && json.chart.result[0].meta;
+    var price = meta ? (meta.regularMarketPrice || meta.chartPreviousClose) : null;
     if (price !== null && price !== undefined && !isNaN(price)) {
+      var currency = (meta && meta.currency) || "";
       return {
         valid: true,
         ticker: resolvedSymbol,
-        message: "Ticker '" + resolvedSymbol + "' verified. Live Price: " + price
+        price: price,
+        currency: currency,
+        message: "Ticker '" + resolvedSymbol + "' verified. Live Price: " + price + (currency ? " " + currency : "")
       };
     } else {
       return { valid: false, message: "No price data found for '" + resolvedSymbol + "' on Yahoo Finance." };
@@ -2295,13 +2344,16 @@ function getHistory(symbols, range) {
     return { success: true, history: result };
   }
   
+  var defaultHeaders = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+    "Accept": "application/json"
+  };
+  
   var requests = uncachedSymbols.map(function(sym) {
-    var resolvedSym = sym;
-    if (sym.indexOf(":S1X") !== -1) {
-      resolvedSym = sym.replace(":S1X", "");
-    }
+    var resolvedSym = resolveYahooSymbol(sym, "", "");
     return {
       url: "https://query1.finance.yahoo.com/v8/finance/chart/" + encodeURIComponent(resolvedSym) + "?range=" + targetRange + "&interval=1d",
+      headers: defaultHeaders,
       muteHttpExceptions: true
     };
   });

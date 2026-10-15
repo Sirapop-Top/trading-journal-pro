@@ -11,9 +11,10 @@ export const useJournalData = () => {
   const [livePrices, setLivePrices] = useState(() => {
     if (typeof localStorage === 'undefined') return {};
     try {
-      // Purge old cost-poisoned unversioned cache
+      // Purge old stale caches
       localStorage.removeItem('alphatrader_live_prices');
-      return JSON.parse(localStorage.getItem('alphatrader_live_prices_v2') || '{}');
+      localStorage.removeItem('alphatrader_live_prices_v2');
+      return JSON.parse(localStorage.getItem('alphatrader_live_prices_v3') || '{}');
     } catch {
       return {};
     }
@@ -224,7 +225,7 @@ export const useJournalData = () => {
           setLivePrices(prev => {
             const merged = { ...prev, ...cryptoPrices };
             try {
-              localStorage.setItem('alphatrader_live_prices_v2', JSON.stringify(merged));
+              localStorage.setItem('alphatrader_live_prices_v3', JSON.stringify(merged));
             } catch {}
             return merged;
           });
@@ -390,7 +391,7 @@ export const useJournalData = () => {
             setLivePrices(prev => {
               const merged = { ...prev, ...data.livePrices };
               try {
-                localStorage.setItem('alphatrader_live_prices_v2', JSON.stringify(merged));
+                localStorage.setItem('alphatrader_live_prices_v3', JSON.stringify(merged));
               } catch {}
               return merged;
             });
@@ -472,7 +473,7 @@ export const useJournalData = () => {
         setLivePrices(prev => {
           const next = { ...prev, ...combinedPrices };
           try {
-            localStorage.setItem('alphatrader_live_prices_v2', JSON.stringify(next));
+            localStorage.setItem('alphatrader_live_prices_v3', JSON.stringify(next));
           } catch {}
           return next;
         });
@@ -500,7 +501,15 @@ export const useJournalData = () => {
 
       if (!silent) {
         if (updatedCount > 0) {
-          message.success(`Live market prices synced (${updatedCount} assets updated).`);
+          const sampleKeys = ['BJC', 'KCE', 'MSTR', 'PTG', 'ROJNA', 'LH', 'META', 'CRCL']
+            .filter(s => combinedPrices[s] !== undefined || combinedPrices[s + '.BK'] !== undefined);
+          const sampleInfo = sampleKeys.slice(0, 3).map(s => {
+            const p = combinedPrices[s] !== undefined ? combinedPrices[s] : combinedPrices[s + '.BK'];
+            const prefix = ['MSTR', 'META', 'CRCL', 'HOOD', 'BTC', 'ETH'].includes(s) ? '$' : '฿';
+            return `${s}: ${prefix}${Number(p).toFixed(2)}`;
+          }).join(', ');
+
+          message.success(`Live market synced (${updatedCount} assets${sampleInfo ? ': ' + sampleInfo : ''}).`);
         } else if (!scriptUrl) {
           message.warning('Google Apps Script URL is not configured. Currency rates updated.');
         } else {

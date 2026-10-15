@@ -30,12 +30,15 @@ export default defineConfig({
         ]
       },
       workbox: {
+        skipWaiting: true,
+        clientsClaim: true,
+        cleanupOutdatedCaches: true,
         globPatterns: ['**/*.{js,css,html,svg,png,ico,woff,woff2}'],
-        // Strictly avoid caching external API requests to Google or Yahoo
+        // Strictly avoid caching external API requests to Google, Yahoo, or Binance
         navigateFallback: null,
         runtimeCaching: [
           {
-            urlPattern: /^https:\/\/(script\.google\.com|docs\.google\.com|open\.er-api\.com|query1\.finance\.yahoo\.com)/,
+            urlPattern: /^https:\/\/(script\.google\.com|docs\.google\.com|open\.er-api\.com|query1\.finance\.yahoo\.com|query2\.finance\.yahoo\.com|api\.binance\.com|data-api\.binance\.vision)/,
             handler: 'NetworkOnly'
           }
         ]
