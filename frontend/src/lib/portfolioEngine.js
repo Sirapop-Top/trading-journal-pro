@@ -15,6 +15,74 @@ export const sortChronologically = (trades = []) => {
 };
 
 /**
+ * Robust, case-insensitive, and ticker-format-aware price resolver.
+ * Handles variations like:
+ * - Case: "btc" vs "BTC"
+ * - Short derivatives: "BTC:S1X" -> resolves "BTC"
+ * - Thai stock postfix: "PTT" <-> "PTT.BK"
+ * - Crypto pairs: "BTC" <-> "BTC-USD" <-> "BTCUSDT"
+ */
+export const resolveLivePrice = (assetName, livePrices = {}, fallbackPrice = 0) => {
+  if (!assetName) return fallbackPrice;
+  if (!livePrices || typeof livePrices !== 'object') return fallbackPrice;
+
+  // 1. Direct match
+  if (livePrices[assetName] !== undefined && livePrices[assetName] !== null && !isNaN(Number(livePrices[assetName]))) {
+    return Number(livePrices[assetName]);
+  }
+
+  const rawTrimmed = String(assetName).trim();
+  const upper = rawTrimmed.toUpperCase();
+  const lower = rawTrimmed.toLowerCase();
+
+  // 2. Exact Upper / Lower
+  if (livePrices[upper] !== undefined && livePrices[upper] !== null && !isNaN(Number(livePrices[upper]))) {
+    return Number(livePrices[upper]);
+  }
+  if (livePrices[lower] !== undefined && livePrices[lower] !== null && !isNaN(Number(livePrices[lower]))) {
+    return Number(livePrices[lower]);
+  }
+
+  // 3. Short 1x stripped (e.g. "BTC:S1X", "ETH:SHORT")
+  const baseAsset = upper.replace(/:S1X|:SHORT/gi, '').trim();
+  if (livePrices[baseAsset] !== undefined && livePrices[baseAsset] !== null && !isNaN(Number(livePrices[baseAsset]))) {
+    return Number(livePrices[baseAsset]);
+  }
+
+  // 4. Thai Stock ticker matching: "PTT" <-> "PTT.BK"
+  const withBK = upper.endsWith('.BK') ? upper : upper + '.BK';
+  const withoutBK = upper.endsWith('.BK') ? upper.slice(0, -3) : upper;
+
+  if (livePrices[withBK] !== undefined && livePrices[withBK] !== null && !isNaN(Number(livePrices[withBK]))) {
+    return Number(livePrices[withBK]);
+  }
+  if (livePrices[withoutBK] !== undefined && livePrices[withoutBK] !== null && !isNaN(Number(livePrices[withoutBK]))) {
+    return Number(livePrices[withoutBK]);
+  }
+
+  // 5. Crypto matching: "BTC" <-> "BTC-USD" <-> "BTCUSDT"
+  const withUSD = upper.endsWith('-USD') ? upper : upper + '-USD';
+  const withoutUSD = upper.endsWith('-USD') ? upper.slice(0, -4) : upper;
+  const withUSDT = upper.endsWith('USDT') ? upper : upper + 'USDT';
+  const withoutUSDT = upper.endsWith('USDT') ? upper.slice(0, -4) : upper;
+
+  if (livePrices[withUSD] !== undefined && livePrices[withUSD] !== null && !isNaN(Number(livePrices[withUSD]))) {
+    return Number(livePrices[withUSD]);
+  }
+  if (livePrices[withoutUSD] !== undefined && livePrices[withoutUSD] !== null && !isNaN(Number(livePrices[withoutUSD]))) {
+    return Number(livePrices[withoutUSD]);
+  }
+  if (livePrices[withUSDT] !== undefined && livePrices[withUSDT] !== null && !isNaN(Number(livePrices[withUSDT]))) {
+    return Number(livePrices[withUSDT]);
+  }
+  if (livePrices[withoutUSDT] !== undefined && livePrices[withoutUSDT] !== null && !isNaN(Number(livePrices[withoutUSDT]))) {
+    return Number(livePrices[withoutUSDT]);
+  }
+
+  return fallbackPrice;
+};
+
+/**
  * Compute running cost basis and P&L per trade.
  * Keyed by trade.id -> { avgCostBasis, realizedPnL, unrealizedPnL, feeAmount }
  */
@@ -42,7 +110,7 @@ export const computeTradeStats = (trades = [], livePrices = {}) => {
       holding.totalCost += costBasis;
       const avgCostAfter = holding.qty > 0 ? (holding.totalCost / holding.qty) : 0;
 
-      const lp = livePrices[name] !== undefined && livePrices[name] !== null ? livePrices[name] : price;
+      const lp = resolveLivePrice(name, livePrices, price);
       const unrealizedPnL = qty * lp - costBasis;
 
       statsMap[trade.id] = {
@@ -216,9 +284,7 @@ export const computePositions = (trades = [], livePrices = {}, liveRates = {}, d
     const wac = qtyHeld > 0 ? (holding.totalCost / qtyHeld) : 0;
     const totalCost = holding.totalCost;
 
-    const livePrice = livePrices[holding.assetName] !== undefined && livePrices[holding.assetName] !== null
-      ? livePrices[holding.assetName]
-      : wac;
+    const livePrice = resolveLivePrice(holding.assetName, livePrices, wac);
 
     const liveValue = qtyHeld * livePrice;
     const unrealizedPnL = liveValue - totalCost;

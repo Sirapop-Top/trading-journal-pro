@@ -601,6 +601,8 @@ function getDashboardData() {
   var portfolios = ["Main Trading", "BTC Stock", "Crypto"];
   var uniqueAssets = [];
   var assetTypesMap = {};
+  var livePrices = {};
+  var liveRates = { "THB": 1.0, "USD": 32.69, "EUR": 38.04 };
   
   if (rows.length > 1) {
     var headers = rows[0].map(function(h) { return h.toString().toLowerCase().trim(); });
@@ -630,6 +632,7 @@ function getDashboardData() {
     var feeAmountIdx = findColIdx(["fee amount", "fee_amount", "fee"]);
     var rebalanceIdIdx = findColIdx(["rebalance id", "rebalance_id"]);
     var fxToThbIdx = findColIdx(["fx to thb", "fx_to_thb", "fxtothb"]);
+    var currentPriceIdx = findColIdx(["current price", "current_price", "currentprice", "market price", "live price"]);
     
     for (var i = 1; i < rows.length; i++) {
       var row = rows[i];
@@ -700,6 +703,17 @@ function getDashboardData() {
       trades.push(trade);
       
       var underlyingAsset = assetName.indexOf(":S1X") !== -1 ? assetName.replace(":S1X", "") : assetName;
+      if (currentPriceIdx !== -1 && row[currentPriceIdx] !== undefined && row[currentPriceIdx] !== "") {
+        try {
+          var rawCp = row[currentPriceIdx].toString().replace(/[$,฿]/g, "").trim();
+          var parsedCp = parseFloat(rawCp);
+          if (!isNaN(parsedCp) && parsedCp > 0) {
+            livePrices[assetName] = parsedCp;
+            livePrices[underlyingAsset] = parsedCp;
+            livePrices[underlyingAsset + ":S1X"] = parsedCp;
+          }
+        } catch (cpErr) {}
+      }
       if (uniqueAssets.indexOf(underlyingAsset) === -1) {
         uniqueAssets.push(underlyingAsset);
         assetTypesMap[underlyingAsset] = assetType === "Crypto Short 1x" ? "Crypto" : assetType;
@@ -818,9 +832,6 @@ function getDashboardData() {
   } catch (e) {}
   
   // Parallel Market Data Fetch
-  var livePrices = {};
-  var liveRates = { "THB": 1.0, "USD": 35.0, "EUR": 38.0 };
-  
   try {
     var defaultHeaders = {
       "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -839,6 +850,7 @@ function getDashboardData() {
       }
     }
     
+    var resolvedSymbols = [];
     for (var j = 0; j < cleanAssets.length; j++) {
       var asset = cleanAssets[j];
       var type = (assetTypesMap && assetTypesMap[asset]) || "";
@@ -862,6 +874,7 @@ function getDashboardData() {
           symbol = upperAsset + ".BK";
         }
       }
+      resolvedSymbols.push(symbol);
       fetchRequests.push({ url: "https://query1.finance.yahoo.com/v8/finance/chart/" + encodeURIComponent(symbol), headers: defaultHeaders, muteHttpExceptions: true });
     }
     
@@ -869,25 +882,72 @@ function getDashboardData() {
     
     try {
       var usdRes = JSON.parse(responses[0].getContentText());
-      liveRates.USD = usdRes.chart.result[0].meta.regularMarketPrice || 35.0;
+      var usdPrice = usdRes.chart.result[0].meta.regularMarketPrice || usdRes.chart.result[0].meta.chartPreviousClose;
+      if (usdPrice) liveRates.USD = usdPrice;
     } catch(e) {}
     
     try {
       var eurRes = JSON.parse(responses[1].getContentText());
-      liveRates.EUR = eurRes.chart.result[0].meta.regularMarketPrice || 38.0;
+      var eurPrice = eurRes.chart.result[0].meta.regularMarketPrice || eurRes.chart.result[0].meta.chartPreviousClose;
+      if (eurPrice) liveRates.EUR = eurPrice;
     } catch(e) {}
     
     for (var j = 0; j < cleanAssets.length; j++) {
       var asset = cleanAssets[j];
+      var sym = resolvedSymbols[j];
+      var upperAsset = asset.toUpperCase().trim();
       var responseIndex = j + 2; 
       try {
         var res = JSON.parse(responses[responseIndex].getContentText());
-        var price = res.chart.result[0].meta.regularMarketPrice;
-        if (price !== undefined && price !== null) {
+        var meta = res && res.chart && res.chart.result && res.chart.result[0] && res.chart.result[0].meta;
+        var price = null;
+        if (meta) {
+          price = meta.regularMarketPrice;
+          if (price === undefined || price === null || isNaN(price)) {
+            price = meta.chartPreviousClose;
+          }
+        }
+        if ((price === undefined || price === null || isNaN(price)) && res && res.chart && res.chart.result && res.chart.result[0].indicators && res.chart.result[0].indicators.quote && res.chart.result[0].indicators.quote[0]) {
+          var closeArr = res.chart.result[0].indicators.quote[0].close;
+          if (Array.isArray(closeArr)) {
+            for (var c = closeArr.length - 1; c >= 0; c--) {
+              if (closeArr[c] !== null && !isNaN(closeArr[c])) {
+                price = closeArr[c];
+                break;
+              }
+            }
+          }
+        }
+        if (price !== undefined && price !== null && !isNaN(price) && price > 0) {
           livePrices[asset] = price;
+          livePrices[upperAsset] = price;
+          livePrices[sym] = price;
+          livePrices[upperAsset + ":S1X"] = price;
         }
       } catch(e) {}
     }
+
+    // Direct Binance API fallback for crypto
+    try {
+      var binanceRes = UrlFetchApp.fetch("https://api.binance.com/api/v3/ticker/price", { muteHttpExceptions: true });
+      if (binanceRes.getResponseCode() === 200) {
+        var bData = JSON.parse(binanceRes.getContentText());
+        var bMap = {};
+        for (var b = 0; b < bData.length; b++) {
+          bMap[bData[b].symbol] = parseFloat(bData[b].price);
+        }
+        for (var j = 0; j < cleanAssets.length; j++) {
+          var cAsset = cleanAssets[j];
+          var uAsset = cAsset.toUpperCase().replace(/:S1X|:SHORT/gi, "").trim();
+          var bPrice = bMap[uAsset + "USDT"] || bMap[uAsset + "USD"];
+          if (bPrice !== undefined && !isNaN(bPrice) && bPrice > 0) {
+            livePrices[cAsset] = bPrice;
+            livePrices[uAsset] = bPrice;
+            livePrices[uAsset + ":S1X"] = bPrice;
+          }
+        }
+      }
+    } catch (bErr) {}
   } catch(e) {}
   
   // Read Custom Portfolios configurations

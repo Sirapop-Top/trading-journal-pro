@@ -78,6 +78,42 @@ export const fetchExchangeRates = async () => {
 };
 
 /**
+ * Fetch live crypto prices directly from Binance public API (CORS enabled worldwide).
+ * Supports symbols like BTC, ETH, SOL, BNB, XRP, DOGE, etc.
+ */
+export const fetchBinanceCryptoPrices = async (symbols = []) => {
+  const prices = {};
+  if (!symbols || symbols.length === 0) return prices;
+
+  try {
+    const res = await fetch('https://api.binance.com/api/v3/ticker/price');
+    if (res.ok) {
+      const data = await res.json();
+      const tickerMap = {};
+      data.forEach(item => {
+        tickerMap[item.symbol] = parseFloat(item.price);
+      });
+
+      symbols.forEach(sym => {
+        if (!sym) return;
+        const cleanSym = String(sym).replace(/:S1X|:SHORT/gi, '').trim().toUpperCase();
+        const usdtPair = cleanSym + 'USDT';
+        const usdPair = cleanSym + 'USD';
+        const price = tickerMap[usdtPair] || tickerMap[usdPair];
+        if (price !== undefined && !isNaN(price)) {
+          prices[sym] = price;
+          prices[cleanSym] = price;
+          prices[cleanSym + ':S1X'] = price;
+        }
+      });
+    }
+  } catch (err) {
+    console.warn('Binance crypto price fetch note:', err);
+  }
+  return prices;
+};
+
+/**
  * Fetch live market prices and rates from Apps Script
  * Tries POST action getData first (bypasses browser CORS & redirect issues),
  * falling back gracefully to GET if necessary.

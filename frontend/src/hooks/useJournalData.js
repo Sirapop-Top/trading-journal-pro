@@ -1,14 +1,21 @@
 import { useState, useEffect, useCallback } from 'react';
 import { message } from 'antd';
 import dayjs from 'dayjs';
-import { fetchSheetCsv, fetchExchangeRates, fetchLiveData } from '../api/sheetsClient.js';
+import { fetchSheetCsv, fetchExchangeRates, fetchLiveData, fetchBinanceCryptoPrices } from '../api/sheetsClient.js';
 
 export const useJournalData = () => {
   const [trades, setTrades] = useState([]);
   const [portfolios, setPortfolios] = useState(['Main Trading', 'BTC Stock', 'Crypto']);
   const [activePortfolio, setActivePortfolio] = useState('All Portfolios');
   const [displayCurrency, setDisplayCurrency] = useState('THB');
-  const [livePrices, setLivePrices] = useState({});
+  const [livePrices, setLivePrices] = useState(() => {
+    if (typeof localStorage === 'undefined') return {};
+    try {
+      return JSON.parse(localStorage.getItem('alphatrader_live_prices') || '{}');
+    } catch {
+      return {};
+    }
+  });
   const [liveRates, setLiveRates] = useState({ THB: 1.0, USD: 32.69, EUR: 38.04 });
   const [syncTime, setSyncTime] = useState(null);
   const [isSyncing, setIsSyncing] = useState(false);
@@ -73,9 +80,11 @@ export const useJournalData = () => {
     const feeAmountIdx = findColIdx(['fee amount', 'fee_amount', 'fee']);
     const rebalanceIdIdx = findColIdx(['rebalance id', 'rebalance_id']);
     const fxToThbIdx = findColIdx(['fx to thb', 'fx_to_thb', 'fxtothb']);
+    const currentPriceIdx = findColIdx(['current price', 'current_price', 'currentprice', 'market price', 'live price']);
 
     const loadedTrades = [];
     const loadedPortfolios = new Set();
+    const sheetPrices = {};
 
     // Fetch Portfolios config sheet if it exists
     let customMappings = {};
@@ -194,7 +203,39 @@ export const useJournalData = () => {
         fxToThb: fxToThbIdx !== -1 && row[fxToThbIdx] !== '' && !isNaN(parseFloat(row[fxToThbIdx])) ? parseFloat(row[fxToThbIdx]) : null
       });
 
+      if (currentPriceIdx !== -1 && row[currentPriceIdx] !== undefined && row[currentPriceIdx] !== '') {
+        const rawCurrentPrice = row[currentPriceIdx].toString().replace(/[$,฿]/g, '').trim();
+        const parsedCurrentPrice = parseFloat(rawCurrentPrice);
+        if (!isNaN(parsedCurrentPrice) && parsedCurrentPrice > 0) {
+          const upperName = assetName.toUpperCase();
+          const cleanName = upperName.replace(/:S1X|:SHORT/gi, '').trim();
+          sheetPrices[assetName] = parsedCurrentPrice;
+          sheetPrices[upperName] = parsedCurrentPrice;
+          sheetPrices[cleanName] = parsedCurrentPrice;
+          sheetPrices[`${cleanName}:S1X`] = parsedCurrentPrice;
+        }
+      }
+
       loadedPortfolios.add(portfolio);
+    }
+
+    // Direct Binance crypto fetch for held assets
+    const uniqueAssetNames = Array.from(new Set(loadedTrades.map(t => t.assetName).filter(Boolean)));
+    try {
+      const cryptoPrices = await fetchBinanceCryptoPrices(uniqueAssetNames);
+      Object.assign(sheetPrices, cryptoPrices);
+    } catch (cErr) {
+      console.warn('Binance price fetch note in sheet load:', cErr);
+    }
+
+    if (Object.keys(sheetPrices).length > 0) {
+      setLivePrices(prev => {
+        const merged = { ...prev, ...sheetPrices };
+        try {
+          localStorage.setItem('alphatrader_live_prices', JSON.stringify(merged));
+        } catch {}
+        return merged;
+      });
     }
 
     setTrades(loadedTrades);
@@ -353,7 +394,15 @@ export const useJournalData = () => {
         const scriptUrl = localStorage.getItem('google_apps_script_url');
         if (scriptUrl) {
           const data = await fetchLiveData(scriptUrl);
-          if (data && data.livePrices) setLivePrices(data.livePrices);
+          if (data && data.livePrices) {
+            setLivePrices(prev => {
+              const merged = { ...prev, ...data.livePrices };
+              try {
+                localStorage.setItem('alphatrader_live_prices', JSON.stringify(merged));
+              } catch {}
+              return merged;
+            });
+          }
           if (data && data.liveRates) setLiveRates(data.liveRates);
           if (data && Array.isArray(data.rebalancePairs) && data.rebalancePairs.length > 0) {
             setRebalancePairs(data.rebalancePairs);
@@ -376,47 +425,86 @@ export const useJournalData = () => {
     }
   }, [fetchDirectFromGoogleSheet, googleSheetId]);
 
-  // Sync Yahoo Finance Tickers
+  // Sync Live Market Prices (Yahoo Finance + Binance + FX)
   const syncMarketData = useCallback(async (silent = false) => {
     if (!silent) setIsSyncing(true);
+    let updatedCount = 0;
     try {
+      // 1. Direct client-side Binance crypto fetch for held assets
+      const assetNames = Array.from(new Set(trades.map(t => t.assetName).filter(Boolean)));
+      let cryptoPrices = {};
+      try {
+        cryptoPrices = await fetchBinanceCryptoPrices(assetNames);
+      } catch (cErr) {
+        console.warn('Direct Binance sync note:', cErr);
+      }
+
+      // 2. Fetch from Google Apps Script if URL is configured
       const scriptUrl = localStorage.getItem('google_apps_script_url');
-      if (!scriptUrl) {
-        // Fallback: update FX rates directly from open.er-api.com
-        const rates = await fetchExchangeRates();
-        setLiveRates(rates);
-        setSyncTime(dayjs().format('YYYY-MM-DD HH:mm:ss'));
-        if (!silent) {
-          message.warning('Google Apps Script URL is not set in Settings. Updated currency rates using fallback.');
+      let scriptData = null;
+      if (scriptUrl) {
+        try {
+          scriptData = await fetchLiveData(scriptUrl);
+        } catch (sErr) {
+          console.warn('Apps Script fetch note:', sErr);
         }
-        return;
       }
-      
-      const data = await fetchLiveData(scriptUrl);
-      if (data) {
-        if (data.livePrices && Object.keys(data.livePrices).length > 0) {
-          setLivePrices(prev => ({ ...prev, ...data.livePrices }));
+
+      // 3. Currency exchange rates
+      let rates = null;
+      if (scriptData && scriptData.liveRates) {
+        rates = scriptData.liveRates;
+      } else {
+        try {
+          rates = await fetchExchangeRates();
+        } catch (rErr) {
+          console.warn('FX rates fetch note:', rErr);
         }
-        if (data.liveRates) {
-          setLiveRates(data.liveRates);
-        }
-        if (Array.isArray(data.rebalancePairs) && data.rebalancePairs.length > 0) {
-          setRebalancePairs(data.rebalancePairs);
-        }
-        if (Array.isArray(data.rebalanceLog) && data.rebalanceLog.length > 0) {
-          setRebalanceLog(data.rebalanceLog);
-        }
-        if (Array.isArray(data.cashLedger) && data.cashLedger.length > 0) {
-          setCashLedger(data.cashLedger);
-        }
-        setSyncTime(dayjs(data.syncTime || undefined).format('YYYY-MM-DD HH:mm:ss'));
       }
+      if (rates) setLiveRates(rates);
+
+      // 4. Merge all prices: script livePrices + cryptoPrices
+      const combinedPrices = {
+        ...(scriptData && scriptData.livePrices ? scriptData.livePrices : {}),
+        ...cryptoPrices
+      };
+
+      if (Object.keys(combinedPrices).length > 0) {
+        setLivePrices(prev => {
+          const next = { ...prev, ...combinedPrices };
+          try {
+            localStorage.setItem('alphatrader_live_prices', JSON.stringify(next));
+          } catch {}
+          return next;
+        });
+        updatedCount = Object.keys(combinedPrices).length;
+      }
+
+      if (scriptData) {
+        if (Array.isArray(scriptData.rebalancePairs) && scriptData.rebalancePairs.length > 0) {
+          setRebalancePairs(scriptData.rebalancePairs);
+        }
+        if (Array.isArray(scriptData.rebalanceLog) && scriptData.rebalanceLog.length > 0) {
+          setRebalanceLog(scriptData.rebalanceLog);
+        }
+        if (Array.isArray(scriptData.cashLedger) && scriptData.cashLedger.length > 0) {
+          setCashLedger(scriptData.cashLedger);
+        }
+      }
+
+      setSyncTime(dayjs().format('YYYY-MM-DD HH:mm:ss'));
+
       if (!silent) {
-        message.success('Live market prices synced from Yahoo Finance.');
+        if (updatedCount > 0) {
+          message.success(`Live market prices synced (${updatedCount} assets updated).`);
+        } else if (!scriptUrl) {
+          message.warning('Google Apps Script URL is not configured. Currency rates updated.');
+        } else {
+          message.info('Market sync completed.');
+        }
       }
     } catch (error) {
       console.warn('Sync market data note:', error);
-      // Fallback: keep cached prices and refresh FX exchange rates from public API
       try {
         const rates = await fetchExchangeRates();
         setLiveRates(rates);
@@ -425,12 +513,12 @@ export const useJournalData = () => {
         console.warn('FX rate fallback note:', fxErr);
       }
       if (!silent) {
-        message.warning('Could not connect to live market sync service. Preserving cached prices & rates.');
+        message.warning('Could not connect to live market sync service. Preserving cached prices.');
       }
     } finally {
       if (!silent) setIsSyncing(false);
     }
-  }, []);
+  }, [trades]);
 
   const handleSaveGoogleSheetSettings = useCallback(async () => {
     setIsSyncingSheet(true);

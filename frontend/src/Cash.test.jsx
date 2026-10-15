@@ -127,14 +127,14 @@ describe('AlphaTrader Step 5: Cash Ledger & Income Integration Suite', () => {
       expect(screen.getByText('Record Cash Entry')).toBeInTheDocument();
     });
 
-    // Check KPI cards
-    expect(screen.getByText(/CASH ON HAND/i)).toBeInTheDocument();
-    expect(screen.getByText(/NET DEPOSITS/i)).toBeInTheDocument();
-    expect(screen.getByText(/DIVIDENDS YTD/i)).toBeInTheDocument();
-
-    // Check Statement Table shows entries
-    expect(screen.getByText('Opening capital')).toBeInTheDocument();
-    expect(screen.getByText('H1 2026 dividend')).toBeInTheDocument();
+    // Check KPI cards & Statement Table entries (wait for async fetch to finish)
+    await waitFor(() => {
+      expect(screen.getAllByText(/CASH ON HAND/i).length).toBeGreaterThan(0);
+      expect(screen.getByText(/NET DEPOSITS/i)).toBeInTheDocument();
+      expect(screen.getByText(/DIVIDENDS YTD/i)).toBeInTheDocument();
+      expect(screen.getByText('Opening capital')).toBeInTheDocument();
+      expect(screen.getByText('H1 2026 dividend')).toBeInTheDocument();
+    });
   });
 
   it('opens CashEntryModal when Record Cash Entry button is clicked', async () => {
