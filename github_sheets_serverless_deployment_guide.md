@@ -1,4 +1,4 @@
-﻿# 📱 Serverless AlphaTrader Deployment Guide (GitHub Pages + Google Sheets)
+# 📱 Serverless AlphaTrader Deployment Guide (GitHub Pages + Google Sheets)
 
 This guide shows you how to deploy AlphaTrader **completely serverless** (100% free, running 24/7 in the cloud, and loading instantly on any device without any cold-start delay).
 
@@ -79,10 +79,10 @@ Paste this complete script inside your Google Apps Script editor (Step 1.6):
 ```javascript
 // ==========================================
 // AlphaTrader — Google Apps Script Backend
-// Schema Version: 2.0 (Rebalance & Multi-Asset Support)
+// Schema Version: 2.3 (Robust Market Data Sync & Symmetry)
 // ==========================================
 
-var SCHEMA_VERSION = "2.2";
+var SCHEMA_VERSION = "2.3";
 
 function doGet(e) {
   var action = e ? e.parameter.action : "";
@@ -106,7 +106,10 @@ function doPost(e) {
   var action = contents.action;
   
   try {
-    if (action === "addTrade") {
+    if (action === "getData") {
+      return ContentService.createTextOutput(JSON.stringify(getDashboardData()))
+        .setMimeType(ContentService.MimeType.JSON);
+    } else if (action === "addTrade") {
       return ContentService.createTextOutput(JSON.stringify(addTrade(contents.trade)))
         .setMimeType(ContentService.MimeType.JSON);
     } else if (action === "addTradesBatch") {

@@ -23,9 +23,15 @@ export const RealizedBreakdownChart = () => {
   } = useAppData();
 
   return (
-    <Card title={`Realized P&L Breakdown (${displayCurrency})`} bordered={false} style={{ height: '370px' }}>
+    <Card 
+      title={`Realized P&L (${displayCurrency})`} 
+      extra={<span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>By Asset</span>}
+      bordered={false} 
+      className="glass-panel card-header-synced equal-height-card"
+      style={{ height: '380px' }}
+    >
       {realizedPnLBreakdownData.length > 0 ? (
-        <ResponsiveContainer width="100%" height={270}>
+        <ResponsiveContainer width="100%" height={260}>
           <BarChart
             data={realizedPnLBreakdownData}
             layout="vertical"
@@ -63,7 +69,7 @@ export const RealizedBreakdownChart = () => {
           </BarChart>
         </ResponsiveContainer>
       ) : (
-        <div style={{ height: '270px', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 12px', textAlign: 'center' }}>
+        <div style={{ height: '260px', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 12px', textAlign: 'center' }}>
           <Text type="secondary" style={{ color: '#5b6b80', fontSize: '13px' }}>
             No realized gains/losses logged yet.
             <br />

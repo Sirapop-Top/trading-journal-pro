@@ -127,25 +127,41 @@ export const AppHeader = () => {
   }
 
   return (
-    <Header style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '16px', height: 'auto', minHeight: '72px', padding: '12px 24px' }}>
-      <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
+    <Header style={{ 
+      display: 'flex', 
+      alignItems: 'center', 
+      justifyContent: 'space-between', 
+      flexWrap: 'wrap', 
+      gap: '12px', 
+      height: 'auto', 
+      minHeight: '64px', 
+      padding: '8px 24px',
+      background: 'var(--bg-container)',
+      borderBottom: '1px solid var(--border-color)',
+      position: 'sticky',
+      top: 0,
+      zIndex: 9
+    }}>
+      {/* Left Control Cluster */}
+      <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
         <Button
           type="text"
           icon={siderCollapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
           onClick={() => setSiderCollapsed(!siderCollapsed)}
           style={{
-            fontSize: '18px',
-            width: 40,
-            height: 40,
+            fontSize: '16px',
+            width: 36,
+            height: 36,
             color: '#ffffff',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
             borderRadius: '8px',
+            background: 'rgba(255, 255, 255, 0.04)'
           }}
         />
         {siderCollapsed && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginRight: '8px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginRight: '6px' }}>
             <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: 'linear-gradient(135deg, #00f2fe 0%, #4facfe 100%)', boxShadow: '0 0 8px rgba(0,242,254,0.6)' }}></div>
             <Text style={{ color: '#ffffff', margin: 0, fontFamily: 'var(--font-family-ui)', fontWeight: 900, fontSize: '15px', letterSpacing: '0.8px' }}>
               ALPHA<span style={{ color: 'var(--primary-color)' }}>TRADER</span>
@@ -153,27 +169,31 @@ export const AppHeader = () => {
           </div>
         )}
         
-        <Space size="small" wrap>
-          <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <Text style={{ fontSize: '12px', color: 'var(--text-secondary)', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Portfolio:</Text>
+        <Space size="middle" wrap style={{ alignItems: 'center' }}>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+            <Text style={{ fontSize: '11px', color: 'var(--text-secondary)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Port:</Text>
             <Select
               value={activePortfolio}
               onChange={(val) => setActivePortfolio(val)}
-              style={{ width: 180 }}
+              style={{ width: 175 }}
+              size="middle"
+              dropdownStyle={{ background: 'var(--bg-card)' }}
             >
-              <Option value="All Portfolios">🗂️ All Portfolios (Aggregated)</Option>
+              <Option value="All Portfolios">🗂️ All (Aggregated)</Option>
               {portfolios.map(p => (
                 <Option key={p} value={p}>💼 {p}</Option>
               ))}
             </Select>
           </span>
 
-          <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <Text style={{ fontSize: '12px', color: 'var(--text-secondary)', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Period:</Text>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+            <Text style={{ fontSize: '11px', color: 'var(--text-secondary)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Period:</Text>
             <Select
               value={dateRangePreset}
               onChange={(val) => setDateRangePreset(val)}
-              style={{ width: 105 }}
+              style={{ width: 100 }}
+              size="middle"
+              dropdownStyle={{ background: 'var(--bg-card)' }}
             >
               <Option value="All">All Time</Option>
               <Option value="YTD">YTD</Option>
@@ -184,6 +204,7 @@ export const AppHeader = () => {
             {dateRangePreset === 'Custom' && (
               <DatePicker.RangePicker
                 style={{ width: 220 }}
+                size="middle"
                 value={customDateRange && customDateRange[0] ? [dayjs(customDateRange[0]), dayjs(customDateRange[1])] : null}
                 onChange={(dates) => {
                   if (dates && dates[0] && dates[1]) {
@@ -196,12 +217,14 @@ export const AppHeader = () => {
             )}
           </span>
 
-          <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <Text style={{ fontSize: '12px', color: 'var(--text-secondary)', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Currency:</Text>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+            <Text style={{ fontSize: '11px', color: 'var(--text-secondary)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px' }}>FX:</Text>
             <Select
               value={displayCurrency}
               onChange={(val) => setDisplayCurrency(val)}
-              style={{ width: 95 }}
+              style={{ width: 90 }}
+              size="middle"
+              dropdownStyle={{ background: 'var(--bg-card)' }}
             >
               <Option value="THB">฿ THB</Option>
               <Option value="USD">$ USD</Option>
@@ -211,9 +234,10 @@ export const AppHeader = () => {
         </Space>
       </div>
 
-      <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '14px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <span style={{ color: 'var(--text-secondary)', fontSize: '11px', fontWeight: 'bold' }}>AUTO-REFRESH:</span>
+      {/* Right Action Cluster */}
+      <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'rgba(255, 255, 255, 0.03)', padding: '4px 10px', borderRadius: '6px' }}>
+          <span style={{ color: 'var(--text-secondary)', fontSize: '10px', fontWeight: 700 }}>AUTO</span>
           <Switch 
             checked={autoRefresh} 
             onChange={(checked) => setAutoRefresh(checked)} 
@@ -224,23 +248,24 @@ export const AppHeader = () => {
         </div>
 
         {syncTime && (
-          <Text style={{ fontSize: '11px', color: '#10b981', fontWeight: 'bold', background: 'rgba(16, 185, 129, 0.08)', padding: '4px 8px', borderRadius: '4px' }} className="financial-num">
-            🟢 Synced: {syncTime}
+          <Text style={{ fontSize: '11px', color: '#10b981', fontWeight: 600, background: 'rgba(16, 185, 129, 0.08)', padding: '5px 10px', borderRadius: '6px', border: '1px solid rgba(16, 185, 129, 0.2)' }} className="financial-num">
+            🟢 {syncTime}
           </Text>
         )}
 
         <Button 
           icon={isCensored ? <EyeInvisibleOutlined /> : <EyeOutlined />} 
           onClick={toggleCensored}
-          style={{ background: 'rgba(255, 255, 255, 0.05)', border: '1px solid var(--border-color)', color: '#ffffff', borderRadius: '6px', fontWeight: 'bold' }}
+          style={{ background: 'rgba(255, 255, 255, 0.04)', border: '1px solid var(--border-color)', color: '#ffffff', borderRadius: '6px', fontWeight: 600 }}
         >
           {isCensored ? "Show Balances" : "Censor Balances"}
         </Button>
+
         {hasPasscode && (
           <Button 
             icon={<LockOutlined />} 
             onClick={() => setIsLocked(true)}
-            style={{ background: 'rgba(255, 255, 255, 0.05)', border: '1px solid var(--border-color)', color: '#ffffff', borderRadius: '6px', fontWeight: 'bold' }}
+            style={{ background: 'rgba(255, 255, 255, 0.04)', border: '1px solid var(--border-color)', color: '#ffffff', borderRadius: '6px', fontWeight: 600 }}
           >
             Lock App
           </Button>
@@ -251,7 +276,7 @@ export const AppHeader = () => {
           icon={<SyncOutlined spin={isSyncing} />} 
           onClick={() => syncMarketData()}
           loading={isSyncing}
-          style={{ background: 'var(--accent-gradient)', border: 'none', color: '#06080f', fontWeight: 'bold', borderRadius: '6px' }}
+          style={{ background: 'var(--accent-gradient)', border: 'none', color: '#06080f', fontWeight: 700, borderRadius: '6px' }}
         >
           Sync Markets
         </Button>

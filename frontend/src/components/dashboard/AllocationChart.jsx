@@ -37,17 +37,18 @@ export const AllocationChart = () => {
         </Select>
       } 
       bordered={false} 
-      style={{ height: '370px' }}
+      className="glass-panel card-header-synced equal-height-card"
+      style={{ height: '380px' }}
     >
       {assetAllocationData.length > 0 ? (
-        <ResponsiveContainer width="100%" height={270}>
+        <ResponsiveContainer width="100%" height={260}>
           <PieChart>
             <Pie
               data={assetAllocationData}
               cx="50%"
               cy="50%"
-              innerRadius={65}
-              outerRadius={90}
+              innerRadius={60}
+              outerRadius={88}
               paddingAngle={4}
               dataKey="value"
             >
@@ -77,7 +78,7 @@ export const AllocationChart = () => {
           </PieChart>
         </ResponsiveContainer>
       ) : (
-        <div style={{ height: '270px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ height: '260px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <Text type="secondary" style={{ color: '#5b6b80' }}>No active asset allocations in this portfolio.</Text>
         </div>
       )}

@@ -1,4 +1,4 @@
-import { Card, Row, Col, Typography, Button, Alert, Space } from 'antd';
+import { Card, Typography, Button, Alert, Space } from 'antd';
 import { PlusOutlined, WalletOutlined, DollarOutlined, TransactionOutlined, PercentageOutlined, FundOutlined } from '@ant-design/icons';
 import { useAppData } from '../../context/AppDataContext.jsx';
 import { formatCurrency } from '../../lib/constants.js';
@@ -73,82 +73,82 @@ export const CashTab = () => {
       )}
 
       {/* KPI Cards Row */}
-      <Row gutter={[16, 16]} style={{ marginBottom: '24px' }}>
-        <Col xs={24} sm={12} lg={8} xl={4}>
-          <Card className="glass-card" styles={{ body: { padding: '16px' } }}>
+      <div className="kpi-5-col-grid">
+        <Card className="glass-panel equal-height-card" styles={{ body: { padding: '18px', height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' } }}>
+          <div>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <Text style={{ color: 'var(--text-secondary)', fontSize: '12px' }}>CASH ON HAND</Text>
+              <Text style={{ color: 'var(--text-secondary)', fontSize: '11px', fontWeight: 700, letterSpacing: '0.5px' }}>CASH ON HAND</Text>
               <WalletOutlined style={{ color: 'var(--primary-color)' }} />
             </div>
-            <div style={{ fontSize: '22px', fontWeight: 'bold', marginTop: '6px', color: cashKpis.cashBalance >= 0 ? '#ffffff' : 'var(--danger-color)', fontFamily: 'monospace' }}>
+            <div style={{ fontSize: '22px', fontWeight: 800, marginTop: '6px', color: cashKpis.cashBalance >= 0 ? '#ffffff' : 'var(--danger-color)' }} className="financial-num">
               {formatCurrency(cashKpis.cashBalance, displayCurrency, isCensored)}
             </div>
-            <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
-              {cashKpis.isFallback ? 'Estimated from Initial Capital' : 'Actual Cash Balance'}
-            </div>
-          </Card>
-        </Col>
+          </div>
+          <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '8px' }}>
+            {cashKpis.isFallback ? 'Estimated (Initial Capital)' : 'Actual Cash Balance'}
+          </div>
+        </Card>
 
-        <Col xs={24} sm={12} lg={8} xl={5}>
-          <Card className="glass-card" styles={{ body: { padding: '16px' } }}>
+        <Card className="glass-panel equal-height-card" styles={{ body: { padding: '18px', height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' } }}>
+          <div>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <Text style={{ color: 'var(--text-secondary)', fontSize: '12px' }}>NET DEPOSITS</Text>
+              <Text style={{ color: 'var(--text-secondary)', fontSize: '11px', fontWeight: 700, letterSpacing: '0.5px' }}>NET DEPOSITS</Text>
               <DollarOutlined style={{ color: '#10b981' }} />
             </div>
-            <div style={{ fontSize: '22px', fontWeight: 'bold', marginTop: '6px', color: '#ffffff', fontFamily: 'monospace' }}>
+            <div style={{ fontSize: '22px', fontWeight: 800, marginTop: '6px', color: '#ffffff' }} className="financial-num">
               {formatCurrency(cashKpis.netDeposits, displayCurrency, isCensored)}
             </div>
-            <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
-              In: {formatCurrency(cashKpis.totalDeposits, displayCurrency, isCensored)} | Out: {formatCurrency(cashKpis.totalWithdraws, displayCurrency, isCensored)}
-            </div>
-          </Card>
-        </Col>
+          </div>
+          <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '8px' }}>
+            In: {formatCurrency(cashKpis.totalDeposits, displayCurrency, isCensored)} | Out: {formatCurrency(cashKpis.totalWithdraws, displayCurrency, isCensored)}
+          </div>
+        </Card>
 
-        <Col xs={24} sm={12} lg={8} xl={5}>
-          <Card className="glass-card" styles={{ body: { padding: '16px' } }}>
+        <Card className="glass-panel equal-height-card" styles={{ body: { padding: '18px', height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' } }}>
+          <div>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <Text style={{ color: 'var(--text-secondary)', fontSize: '12px' }}>DIVIDENDS YTD</Text>
+              <Text style={{ color: 'var(--text-secondary)', fontSize: '11px', fontWeight: 700, letterSpacing: '0.5px' }}>DIVIDENDS YTD</Text>
               <PercentageOutlined style={{ color: '#00f2fe' }} />
             </div>
-            <div style={{ fontSize: '22px', fontWeight: 'bold', marginTop: '6px', color: 'var(--success-color)', fontFamily: 'monospace' }}>
+            <div style={{ fontSize: '22px', fontWeight: 800, marginTop: '6px', color: 'var(--success-color)' }} className="financial-num">
               {formatCurrency(cashKpis.dividendsYTD, displayCurrency, isCensored)}
             </div>
-            <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
-              All-time: {formatCurrency(cashKpis.totalDividendsEver, displayCurrency, isCensored)}
-            </div>
-          </Card>
-        </Col>
+          </div>
+          <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '8px' }}>
+            All-time: {formatCurrency(cashKpis.totalDividendsEver, displayCurrency, isCensored)}
+          </div>
+        </Card>
 
-        <Col xs={24} sm={12} lg={8} xl={5}>
-          <Card className="glass-card" styles={{ body: { padding: '16px' } }}>
+        <Card className="glass-panel equal-height-card" styles={{ body: { padding: '18px', height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' } }}>
+          <div>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <Text style={{ color: 'var(--text-secondary)', fontSize: '12px' }}>INTEREST YTD</Text>
+              <Text style={{ color: 'var(--text-secondary)', fontSize: '11px', fontWeight: 700, letterSpacing: '0.5px' }}>INTEREST YTD</Text>
               <TransactionOutlined style={{ color: '#8b5cf6' }} />
             </div>
-            <div style={{ fontSize: '22px', fontWeight: 'bold', marginTop: '6px', color: '#8b5cf6', fontFamily: 'monospace' }}>
+            <div style={{ fontSize: '22px', fontWeight: 800, marginTop: '6px', color: '#8b5cf6' }} className="financial-num">
               {formatCurrency(cashKpis.interestYTD, displayCurrency, isCensored)}
             </div>
-            <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
-              All-time: {formatCurrency(cashKpis.totalInterestEver, displayCurrency, isCensored)}
-            </div>
-          </Card>
-        </Col>
+          </div>
+          <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '8px' }}>
+            All-time: {formatCurrency(cashKpis.totalInterestEver, displayCurrency, isCensored)}
+          </div>
+        </Card>
 
-        <Col xs={24} sm={12} lg={8} xl={5}>
-          <Card className="glass-card" styles={{ body: { padding: '16px' } }}>
+        <Card className="glass-panel equal-height-card" styles={{ body: { padding: '18px', height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' } }}>
+          <div>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <Text style={{ color: 'var(--text-secondary)', fontSize: '12px' }}>TOTAL RETURN</Text>
+              <Text style={{ color: 'var(--text-secondary)', fontSize: '11px', fontWeight: 700, letterSpacing: '0.5px' }}>TOTAL CASH RETURN</Text>
               <FundOutlined style={{ color: cashKpis.totalReturn >= 0 ? 'var(--success-color)' : 'var(--danger-color)' }} />
             </div>
-            <div style={{ fontSize: '22px', fontWeight: 'bold', marginTop: '6px', color: cashKpis.totalReturn >= 0 ? 'var(--success-color)' : 'var(--danger-color)', fontFamily: 'monospace' }}>
+            <div style={{ fontSize: '22px', fontWeight: 800, marginTop: '6px', color: cashKpis.totalReturn >= 0 ? 'var(--success-color)' : 'var(--danger-color)' }} className="financial-num">
               {formatCurrency(cashKpis.totalReturn, displayCurrency, isCensored)}
             </div>
-            <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
-              Realized + Unrealized + Income - Ledger Costs
-            </div>
-          </Card>
-        </Col>
-      </Row>
+          </div>
+          <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '8px' }}>
+            Realized + Unrealized + Cash Income
+          </div>
+        </Card>
+      </div>
 
       {/* Cash Statement Table Card */}
       <Card

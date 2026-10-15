@@ -3,7 +3,7 @@
 // Schema Version: 2.0 (Rebalance & Multi-Asset Support)
 // ==========================================
 
-var SCHEMA_VERSION = "2.2";
+var SCHEMA_VERSION = "2.3";
 
 function doGet(e) {
   var action = e ? e.parameter.action : "";
@@ -27,7 +27,10 @@ function doPost(e) {
   var action = contents.action;
   
   try {
-    if (action === "addTrade") {
+    if (action === "getData") {
+      return ContentService.createTextOutput(JSON.stringify(getDashboardData()))
+        .setMimeType(ContentService.MimeType.JSON);
+    } else if (action === "addTrade") {
       return ContentService.createTextOutput(JSON.stringify(addTrade(contents.trade)))
         .setMimeType(ContentService.MimeType.JSON);
     } else if (action === "addTradesBatch") {
@@ -587,7 +590,8 @@ function getHeldQty(portfolio, assetName) {
 }
 
 function getDashboardData() {
-  ensureTableStructure();
+  try {
+    ensureTableStructure();
   
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName("Journal");
@@ -818,12 +822,25 @@ function getDashboardData() {
   var liveRates = { "THB": 1.0, "USD": 35.0, "EUR": 38.0 };
   
   try {
+    var defaultHeaders = {
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      "Accept": "application/json"
+    };
     var fetchRequests = [];
-    fetchRequests.push({ url: "https://query1.finance.yahoo.com/v8/finance/chart/USDTHB=X", muteHttpExceptions: true });
-    fetchRequests.push({ url: "https://query1.finance.yahoo.com/v8/finance/chart/EURTHB=X", muteHttpExceptions: true });
+    fetchRequests.push({ url: "https://query1.finance.yahoo.com/v8/finance/chart/USDTHB=X", headers: defaultHeaders, muteHttpExceptions: true });
+    fetchRequests.push({ url: "https://query1.finance.yahoo.com/v8/finance/chart/EURTHB=X", headers: defaultHeaders, muteHttpExceptions: true });
     
-    for (var j = 0; j < uniqueAssets.length; j++) {
-      var asset = uniqueAssets[j];
+    // Sanitize uniqueAssets to remove empty strings or whitespace
+    var cleanAssets = [];
+    for (var u = 0; u < uniqueAssets.length; u++) {
+      var a = uniqueAssets[u];
+      if (a && typeof a === "string" && a.trim().length > 0 && cleanAssets.indexOf(a.trim()) === -1) {
+        cleanAssets.push(a.trim());
+      }
+    }
+    
+    for (var j = 0; j < cleanAssets.length; j++) {
+      var asset = cleanAssets[j];
       var type = (assetTypesMap && assetTypesMap[asset]) || "";
       var symbol = asset;
       var upperAsset = asset.toUpperCase().trim();
@@ -845,7 +862,7 @@ function getDashboardData() {
           symbol = upperAsset + ".BK";
         }
       }
-      fetchRequests.push({ url: "https://query1.finance.yahoo.com/v8/finance/chart/" + symbol, muteHttpExceptions: true });
+      fetchRequests.push({ url: "https://query1.finance.yahoo.com/v8/finance/chart/" + encodeURIComponent(symbol), headers: defaultHeaders, muteHttpExceptions: true });
     }
     
     var responses = UrlFetchApp.fetchAll(fetchRequests);
@@ -860,8 +877,8 @@ function getDashboardData() {
       liveRates.EUR = eurRes.chart.result[0].meta.regularMarketPrice || 38.0;
     } catch(e) {}
     
-    for (var j = 0; j < uniqueAssets.length; j++) {
-      var asset = uniqueAssets[j];
+    for (var j = 0; j < cleanAssets.length; j++) {
+      var asset = cleanAssets[j];
       var responseIndex = j + 2; 
       try {
         var res = JSON.parse(responses[responseIndex].getContentText());
@@ -950,17 +967,31 @@ function getDashboardData() {
     }
   } catch (e) {}
   
-  return {
-    trades: trades,
-    portfolios: portfolios,
-    portfolioConfigs: portfolioConfigs,
-    rebalancePairs: rebalancePairs,
-    rebalanceLog: rebalanceLog,
-    cashLedger: cashLedger,
-    livePrices: livePrices,
-    liveRates: liveRates,
-    syncTime: new Date().toISOString()
-  };
+    return {
+      trades: trades,
+      portfolios: portfolios,
+      portfolioConfigs: portfolioConfigs,
+      rebalancePairs: rebalancePairs,
+      rebalanceLog: rebalanceLog,
+      cashLedger: cashLedger,
+      livePrices: livePrices,
+      liveRates: liveRates,
+      syncTime: new Date().toISOString()
+    };
+  } catch (outerErr) {
+    return {
+      trades: [],
+      portfolios: ["Main Trading", "BTC Stock", "Crypto"],
+      portfolioConfigs: {},
+      rebalancePairs: [],
+      rebalanceLog: [],
+      cashLedger: [],
+      livePrices: {},
+      liveRates: { "THB": 1.0, "USD": 32.69, "EUR": 38.04 },
+      syncTime: new Date().toISOString(),
+      error: outerErr.toString()
+    };
+  }
 }
 
 // Build a Journal row array

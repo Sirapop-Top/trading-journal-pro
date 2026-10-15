@@ -1,4 +1,4 @@
-import { Card, Space, Radio, Select, Typography } from 'antd';
+import { Card, Select, Typography } from 'antd';
 import {
   ResponsiveContainer,
   BarChart,
@@ -27,48 +27,38 @@ export const PnlDistributionChart = () => {
     formatCurrency
   } = useAppData();
 
+  const handleSelectView = (val) => {
+    const [mode, dim] = val.split(':');
+    setPnlMode(mode);
+    setPnlDimension(dim);
+  };
+
+  const currentVal = `${pnlMode}:${pnlDimension}`;
+
   return (
     <Card 
-      title={`Portfolio P&L (${displayCurrency})`}
+      title={`P&L Distribution (${displayCurrency})`}
       extra={
-        <Space size="small">
-          <Radio.Group
-            size="small"
-            value={pnlMode}
-            onChange={e => {
-              const mode = e.target.value;
-              if (mode === 'unrealized' && pnlDimension === 'strategy') {
-                setPnlDimension('name');
-              }
-              setPnlMode(mode);
-            }}
-          >
-            <Radio.Button value="realized">Realized</Radio.Button>
-            <Radio.Button value="unrealized">Unrealized</Radio.Button>
-          </Radio.Group>
-          <Select
-            size="small"
-            value={pnlDimension}
-            onChange={val => {
-              if (val === 'strategy' && pnlMode === 'unrealized') {
-                setPnlMode('realized');
-              }
-              setPnlDimension(val);
-            }}
-            style={{ width: 130 }}
-            dropdownStyle={{ background: 'var(--bg-card)' }}
-          >
-            <Option value="strategy" disabled={pnlMode === 'unrealized'}>By Strategy</Option>
-            <Option value="type">By Category</Option>
-            <Option value="name">By Asset Name</Option>
-          </Select>
-        </Space>
+        <Select
+          size="small"
+          value={currentVal}
+          onChange={handleSelectView}
+          style={{ width: 140 }}
+          dropdownStyle={{ background: 'var(--bg-card)' }}
+        >
+          <Option value="realized:strategy">Realized • Strategy</Option>
+          <Option value="realized:name">Realized • Asset</Option>
+          <Option value="realized:type">Realized • Category</Option>
+          <Option value="unrealized:name">Paper • Asset</Option>
+          <Option value="unrealized:type">Paper • Category</Option>
+        </Select>
       } 
       bordered={false} 
-      style={{ height: '370px' }}
+      className="glass-panel card-header-synced equal-height-card"
+      style={{ height: '380px' }}
     >
       {pnlDistributionData.length > 0 ? (
-        <ResponsiveContainer width="100%" height={270}>
+        <ResponsiveContainer width="100%" height={260}>
           <BarChart
             data={pnlDistributionData}
             margin={{ top: 10, right: 10, left: 10, bottom: 20 }}
@@ -105,7 +95,7 @@ export const PnlDistributionChart = () => {
           </BarChart>
         </ResponsiveContainer>
       ) : (
-        <div style={{ height: '270px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ height: '260px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <Text type="secondary" style={{ color: '#5b6b80' }}>No strategy data logged in this portfolio.</Text>
         </div>
       )}

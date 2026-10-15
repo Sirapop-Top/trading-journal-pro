@@ -171,15 +171,21 @@ export const DashboardTab = () => {
       <AnalyticsGrid />
 
       {/* Allocation & Strategy Charts Row */}
-      <Row gutter={[24, 24]}>
-        <Col xs={24} lg={8}>
-          <AllocationChart />
+      <Row gutter={[20, 20]} align="stretch">
+        <Col xs={24} lg={8} style={{ display: 'flex' }}>
+          <div style={{ width: '100%' }}>
+            <AllocationChart />
+          </div>
         </Col>
-        <Col xs={24} lg={8}>
-          <PnlDistributionChart />
+        <Col xs={24} lg={8} style={{ display: 'flex' }}>
+          <div style={{ width: '100%' }}>
+            <PnlDistributionChart />
+          </div>
         </Col>
-        <Col xs={24} lg={8}>
-          <RealizedBreakdownChart />
+        <Col xs={24} lg={8} style={{ display: 'flex' }}>
+          <div style={{ width: '100%' }}>
+            <RealizedBreakdownChart />
+          </div>
         </Col>
       </Row>
 

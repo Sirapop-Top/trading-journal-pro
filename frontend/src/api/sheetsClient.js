@@ -79,10 +79,26 @@ export const fetchExchangeRates = async () => {
 
 /**
  * Fetch live market prices and rates from Apps Script
+ * Tries POST action getData first (bypasses browser CORS & redirect issues),
+ * falling back gracefully to GET if necessary.
  */
 export const fetchLiveData = async (scriptUrl) => {
   if (!scriptUrl) return null;
-  return await callGoogleAppsScript(`${scriptUrl}?action=getData`);
+  const cleanUrl = scriptUrl.trim();
+  
+  // Attempt POST first: Content-Type: text/plain prevents CORS preflight and follows Apps Script redirects seamlessly
+  try {
+    const postRes = await postAction(cleanUrl, 'getData');
+    if (postRes && (postRes.livePrices || postRes.liveRates || postRes.trades || postRes.syncTime)) {
+      return postRes;
+    }
+  } catch (postErr) {
+    console.warn('fetchLiveData POST attempt failed, trying GET fallback:', postErr);
+  }
+
+  // Fallback to GET
+  const separator = cleanUrl.includes('?') ? '&' : '?';
+  return await callGoogleAppsScript(`${cleanUrl}${separator}action=getData`);
 };
 
 /**

@@ -382,12 +382,24 @@ export const useJournalData = () => {
     try {
       const scriptUrl = localStorage.getItem('google_apps_script_url');
       if (!scriptUrl) {
-        throw new Error('Google Apps Script URL is not configured in Settings.');
+        // Fallback: update FX rates directly from open.er-api.com
+        const rates = await fetchExchangeRates();
+        setLiveRates(rates);
+        setSyncTime(dayjs().format('YYYY-MM-DD HH:mm:ss'));
+        if (!silent) {
+          message.warning('Google Apps Script URL is not set in Settings. Updated currency rates using fallback.');
+        }
+        return;
       }
+      
       const data = await fetchLiveData(scriptUrl);
       if (data) {
-        setLivePrices(data.livePrices || {});
-        setLiveRates(data.liveRates || { THB: 1.0, USD: 32.69, EUR: 38.04 });
+        if (data.livePrices && Object.keys(data.livePrices).length > 0) {
+          setLivePrices(prev => ({ ...prev, ...data.livePrices }));
+        }
+        if (data.liveRates) {
+          setLiveRates(data.liveRates);
+        }
         if (Array.isArray(data.rebalancePairs) && data.rebalancePairs.length > 0) {
           setRebalancePairs(data.rebalancePairs);
         }
@@ -397,17 +409,23 @@ export const useJournalData = () => {
         if (Array.isArray(data.cashLedger) && data.cashLedger.length > 0) {
           setCashLedger(data.cashLedger);
         }
-        if (data.syncTime) {
-          setSyncTime(dayjs(data.syncTime).format('YYYY-MM-DD HH:mm:ss'));
-        }
+        setSyncTime(dayjs(data.syncTime || undefined).format('YYYY-MM-DD HH:mm:ss'));
       }
       if (!silent) {
         message.success('Live market prices synced from Yahoo Finance.');
       }
     } catch (error) {
-      console.error('Error syncing market data:', error);
+      console.warn('Sync market data note:', error);
+      // Fallback: keep cached prices and refresh FX exchange rates from public API
+      try {
+        const rates = await fetchExchangeRates();
+        setLiveRates(rates);
+        setSyncTime(dayjs().format('YYYY-MM-DD HH:mm:ss'));
+      } catch (fxErr) {
+        console.warn('FX rate fallback note:', fxErr);
+      }
       if (!silent) {
-        message.error('Failed to sync live market data. Checking cache.');
+        message.warning('Could not connect to live market sync service. Preserving cached prices & rates.');
       }
     } finally {
       if (!silent) setIsSyncing(false);
