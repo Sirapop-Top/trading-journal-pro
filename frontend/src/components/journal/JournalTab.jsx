@@ -201,7 +201,7 @@ export const JournalTab = () => {
       width: 130,
       className: 'financial-num',
       render: (_, record) => {
-        const lp = resolveLivePrice(livePrices, record.assetName, record.assetType);
+        const lp = resolveLivePrice(record.assetName, livePrices, null);
         if (lp === undefined || lp === null) return '-';
         const rateToTHB = liveRates[record.currency] || 1.0;
         const displayRateToTHB = liveRates[displayCurrency] || 1.0;

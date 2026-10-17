@@ -295,7 +295,7 @@ export const useTradeActions = ({
       const rateToTHB = journal.liveRates[trade.currency] || 1.0;
       const displayRateToTHB = journal.liveRates[journal.displayCurrency] || 1.0;
 
-      const resolvedLive = resolveLivePrice(journal.livePrices, trade.assetName, trade.assetType);
+      const resolvedLive = resolveLivePrice(trade.assetName, journal.livePrices, null);
       const livePriceLocal = resolvedLive !== null ? resolvedLive : price;
 
       const livePriceConverted = (livePriceLocal * rateToTHB) / displayRateToTHB;

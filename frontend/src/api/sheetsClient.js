@@ -136,6 +136,46 @@ export const fetchBinanceCryptoPrices = async (symbols = []) => {
 };
 
 /**
+ * Fetch live Yahoo Finance prices & FX rates directly from Vite local endpoint (/api/yahoo-live)
+ * or public CORS proxy fallback when Google Apps Script is not yet configured.
+ */
+export const fetchYahooLiveBrowser = async (trades = []) => {
+  const symbols = new Set(['USDTHB=X', 'EURTHB=X']);
+  (trades || []).forEach(t => {
+    const clean = String(t.assetName || '').replace(/:S1X|:SHORT/gi, '').trim().toUpperCase();
+    if (!clean) return;
+    const typeLower = String(t.assetType || '').toLowerCase();
+    if (typeLower.includes('crypto')) {
+      symbols.add(clean.endsWith('-USD') ? clean : `${clean}-USD`);
+    } else if (typeLower.includes('thai') || (t.currency === 'THB' && !typeLower.includes('global') && !typeLower.includes('us'))) {
+      symbols.add(clean.endsWith('.BK') ? clean : `${clean}.BK`);
+    } else {
+      symbols.add(clean);
+    }
+  });
+
+  const symList = Array.from(symbols);
+
+  // 1. Try local Vite server / preview server live Yahoo endpoint first
+  try {
+    const res = await fetch(`/api/yahoo-live?symbols=${encodeURIComponent(symList.join(','))}`);
+    if (res.ok) {
+      const contentType = res.headers.get('content-type') || '';
+      if (contentType.includes('application/json')) {
+        const data = await res.json();
+        if (data && data.ok && data.livePrices) {
+          return { livePrices: data.livePrices, liveRates: data.liveRates };
+        }
+      }
+    }
+  } catch {
+    // Ignore when running on static hosting without /api/yahoo-live
+  }
+
+  return null;
+};
+
+/**
  * Fetch live market prices and rates from Apps Script.
  * Uses GET ?action=getData first (compatible with both V.เก่า and V.2.6 Apps Script),
  * falling back to POST if needed.

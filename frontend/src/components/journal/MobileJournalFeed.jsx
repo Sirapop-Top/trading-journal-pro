@@ -1,6 +1,7 @@
 import { Space, Button, Popconfirm, Tag, Typography } from 'antd';
 import { EditOutlined, SwapOutlined, DeleteOutlined } from '@ant-design/icons';
 import { useAppData } from '../../context/AppDataContext.jsx';
+import { resolveLivePrice } from '../../lib/portfolioEngine.js';
 
 const { Text } = Typography;
 
@@ -9,6 +10,7 @@ export const MobileJournalFeed = () => {
     journalFilteredTrades,
     tradesWithRunningStats,
     liveRates,
+    livePrices,
     displayCurrency,
     isCensored,
     formatCurrency,
@@ -66,6 +68,8 @@ export const MobileJournalFeed = () => {
           const stats = tradesWithRunningStats[trade.id];
           const rateToTHB = liveRates[trade.currency] || 1.0;
           const displayRateToTHB = liveRates[displayCurrency] || 1.0;
+          const lp = resolveLivePrice(trade.assetName, livePrices, null);
+          const livePriceConverted = lp !== null ? (lp * rateToTHB) / displayRateToTHB : null;
           
           const pnlLocal = stats ? (isBuy ? stats.unrealizedPnL : stats.realizedPnL) : 0.0;
           const pnlConverted = (pnlLocal * rateToTHB) / displayRateToTHB;
@@ -108,9 +112,9 @@ export const MobileJournalFeed = () => {
                   </div>
                 </div>
                 <div>
-                  <div className="mobile-feed-card-label">Fee</div>
-                  <div className="mobile-feed-card-value financial-num">
-                    {feeAmount > 0 ? formatCurrency(feeAmount, trade.currency) : 'Free'}
+                  <div className="mobile-feed-card-label">Live Price ({displayCurrency})</div>
+                  <div className="mobile-feed-card-value financial-num" style={{ color: '#00f2fe' }}>
+                    {livePriceConverted !== null ? formatCurrency(livePriceConverted, displayCurrency) : '-'}
                   </div>
                 </div>
                 <div>

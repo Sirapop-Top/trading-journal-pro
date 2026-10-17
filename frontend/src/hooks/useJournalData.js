@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { message } from 'antd';
 import dayjs from 'dayjs';
-import { fetchSheetCsv, fetchExchangeRates, fetchLiveData, fetchBinanceCryptoPrices } from '../api/sheetsClient.js';
+import { fetchSheetCsv, fetchExchangeRates, fetchLiveData, fetchBinanceCryptoPrices, fetchYahooLiveBrowser } from '../api/sheetsClient.js';
 import yahooSnapshot from '../data/yahooPricesSnapshot.json';
 
 const isTestEnv = Boolean(import.meta.env && import.meta.env.VITEST);
@@ -44,10 +44,11 @@ export const useJournalData = () => {
   const [livePrices, setLivePrices] = useState(() => {
     if (typeof localStorage === 'undefined') return { ...defaultYahooPrices };
     try {
-      // Purge old stale caches
+      // Purge old stale caches (v1-v3 had sheet entry prices mixed in)
       localStorage.removeItem('alphatrader_live_prices');
       localStorage.removeItem('alphatrader_live_prices_v2');
-      const cached = JSON.parse(localStorage.getItem('alphatrader_live_prices_v3') || '{}');
+      localStorage.removeItem('alphatrader_live_prices_v3');
+      const cached = JSON.parse(localStorage.getItem('alphatrader_live_prices_v4') || '{}');
       const manual = JSON.parse(localStorage.getItem('alphatrader_manual_prices') || '{}');
       return { ...defaultYahooPrices, ...cached, ...manual };
     } catch {
@@ -112,7 +113,6 @@ export const useJournalData = () => {
     const actionIdx = findColIdx(['action']);
     const quantityIdx = findColIdx(['quantity', 'qty']);
     const priceUnitIdx = findColIdx(['price/unit', 'price_unit', 'price unit', 'price']);
-    const currentPriceIdx = findColIdx(['current price', 'current_price', 'market price']);
     const whyIdx = findColIdx(['why', 'decision', 'reason']);
     const remarkIdx = findColIdx(['remark', 'note']);
     const portfolioIdx = findColIdx(['portfolio', 'port']);
@@ -122,7 +122,6 @@ export const useJournalData = () => {
 
     const loadedTrades = [];
     const loadedPortfolios = new Set();
-    const sheetCurrentPrices = {};
 
     // Fetch Portfolios config sheet if it exists
     let customMappings = {};
@@ -213,12 +212,6 @@ export const useJournalData = () => {
 
       const qty = quantityIdx !== -1 ? parseFloat(row[quantityIdx]) : 0;
       const price = priceUnitIdx !== -1 ? parseFloat(row[priceUnitIdx]) : 0;
-      if (currentPriceIdx !== -1 && row[currentPriceIdx]) {
-        const sheetPrice = parseFloat(String(row[currentPriceIdx]).replace(/[,฿$€]/g, '').trim());
-        if (!isNaN(sheetPrice) && sheetPrice > 0) {
-          sheetCurrentPrices[assetName.toUpperCase()] = sheetPrice;
-        }
-      }
 
       let parsedFee = 0.0;
       if (feeAmountIdx !== -1 && row[feeAmountIdx]) {
@@ -254,7 +247,13 @@ export const useJournalData = () => {
     setPortfolios(Array.from(loadedPortfolios));
     setGoogleSheetSyncCount(loadedTrades.length);
 
-    if (Object.keys(defaultYahooPrices).length > 0 || Object.keys(sheetCurrentPrices).length > 0) {
+    // Fetch live Yahoo Finance prices via local Vite bridge if available
+    let yahooLive = null;
+    if (!isTestEnv) {
+      yahooLive = await fetchYahooLiveBrowser(loadedTrades);
+    }
+
+    if (Object.keys(defaultYahooPrices).length > 0 || (yahooLive && Object.keys(yahooLive.livePrices || {}).length > 0)) {
       setLivePrices(prev => {
         const manual = (() => {
           try {
@@ -263,9 +262,9 @@ export const useJournalData = () => {
             return {};
           }
         })();
-        const merged = { ...defaultYahooPrices, ...prev, ...sheetCurrentPrices, ...manual };
+        const merged = { ...defaultYahooPrices, ...prev, ...(yahooLive?.livePrices || {}), ...manual };
         try {
-          localStorage.setItem('alphatrader_live_prices_v3', JSON.stringify(merged));
+          localStorage.setItem('alphatrader_live_prices_v4', JSON.stringify(merged));
         } catch {}
         return merged;
       });
@@ -285,7 +284,7 @@ export const useJournalData = () => {
           setLivePrices(prev => {
             const merged = { ...prev, ...cryptoPrices };
             try {
-              localStorage.setItem('alphatrader_live_prices_v3', JSON.stringify(merged));
+              localStorage.setItem('alphatrader_live_prices_v4', JSON.stringify(merged));
             } catch {}
             return merged;
           });
@@ -425,8 +424,15 @@ export const useJournalData = () => {
     }
     setCashLedger(loadedCashLedger);
 
-    const rates = await fetchExchangeRates();
-    setLiveRates(rates);
+    // Use Yahoo Finance USDTHB=X / EURTHB=X rate consistently so it matches Settings & Yahoo Finance
+    if (yahooLive && yahooLive.liveRates) {
+      setLiveRates(yahooLive.liveRates);
+    } else if (!isTestEnv && yahooSnapshot?.liveRates) {
+      setLiveRates(yahooSnapshot.liveRates);
+    } else {
+      const rates = await fetchExchangeRates();
+      setLiveRates(rates);
+    }
     setSyncTime(dayjs().format('YYYY-MM-DD HH:mm:ss'));
   }, []);
 
@@ -451,7 +457,7 @@ export const useJournalData = () => {
             setLivePrices(prev => {
               const merged = { ...prev, ...data.livePrices };
               try {
-                localStorage.setItem('alphatrader_live_prices_v3', JSON.stringify(merged));
+                localStorage.setItem('alphatrader_live_prices_v4', JSON.stringify(merged));
               } catch {}
               return merged;
             });
@@ -468,7 +474,7 @@ export const useJournalData = () => {
           }
         }
       } catch (priceErr) {
-        console.warn('Live prices from Apps Script unavailable, using WAC fallback:', priceErr);
+        console.warn('Live prices from Apps Script unavailable, using Yahoo Finance snapshot/bridge:', priceErr);
       }
     } catch (error) {
       console.error('Error fetching data:', error);
@@ -510,10 +516,20 @@ export const useJournalData = () => {
         }
       }
 
-      // 3. Currency exchange rates
+      // 2b. Also check real-time Yahoo Finance local bridge if available
+      let yahooLive = null;
+      if (!isTestEnv) {
+        yahooLive = await fetchYahooLiveBrowser(trades);
+      }
+
+      // 3. Currency exchange rates (Yahoo Finance USDTHB=X / EURTHB=X takes priority)
       let rates = null;
       if (scriptData && scriptData.liveRates) {
         rates = scriptData.liveRates;
+      } else if (yahooLive && yahooLive.liveRates) {
+        rates = yahooLive.liveRates;
+      } else if (!isTestEnv && yahooSnapshot?.liveRates) {
+        rates = yahooSnapshot.liveRates;
       } else {
         try {
           rates = await fetchExchangeRates();
@@ -523,7 +539,7 @@ export const useJournalData = () => {
       }
       if (rates) setLiveRates(rates);
 
-      // 4. Merge all prices with precedence: Manual > Apps Script (Yahoo) > Binance (Crypto)
+      // 4. Merge all prices with precedence: Manual > Apps Script / Live Yahoo > Binance (Crypto)
       const currentManual = (() => {
         try {
           return JSON.parse(localStorage.getItem('alphatrader_manual_prices') || '{}');
@@ -532,7 +548,10 @@ export const useJournalData = () => {
         }
       })();
 
-      const scriptPrices = (scriptData && scriptData.livePrices) ? scriptData.livePrices : {};
+      const scriptPrices = {
+        ...(yahooLive?.livePrices || {}),
+        ...((scriptData && scriptData.livePrices) ? scriptData.livePrices : {})
+      };
       const newPriceSources = {};
       Object.keys(defaultYahooPrices).forEach(k => {
         newPriceSources[k.toUpperCase()] = 'yahoo';
@@ -559,7 +578,7 @@ export const useJournalData = () => {
         setLivePrices(prev => {
           const next = { ...prev, ...combinedPrices };
           try {
-            localStorage.setItem('alphatrader_live_prices_v3', JSON.stringify(next));
+            localStorage.setItem('alphatrader_live_prices_v4', JSON.stringify(next));
           } catch {}
           return next;
         });
@@ -587,7 +606,7 @@ export const useJournalData = () => {
 
       if (!silent) {
         if (updatedCount > 0) {
-          const sampleKeys = ['BJC', 'KCE', 'MSTR', 'PTG', 'ROJNA', 'LH', 'META', 'CRCL']
+          const sampleKeys = ['BJC', 'KCE', 'MSTR', 'PTG', 'IVL', 'META', 'CRCL']
             .filter(s => combinedPrices[s] !== undefined || combinedPrices[s + '.BK'] !== undefined);
           const sampleInfo = sampleKeys.slice(0, 3).map(s => {
             const p = combinedPrices[s] !== undefined ? combinedPrices[s] : combinedPrices[s + '.BK'];
@@ -595,7 +614,7 @@ export const useJournalData = () => {
             return `${s}: ${prefix}${Number(p).toFixed(2)}`;
           }).join(', ');
 
-          message.success(`Live market synced (${updatedCount} assets${sampleInfo ? ': ' + sampleInfo : ''}).`);
+          message.success(`Live market synced from Yahoo Finance (${updatedCount} assets${sampleInfo ? ': ' + sampleInfo : ''}).`);
         } else if (!scriptUrl) {
           message.warning('Google Apps Script URL is not configured. Live stock prices cannot be fetched without it. Click to configure or set manual prices.');
         } else {
@@ -644,7 +663,7 @@ export const useJournalData = () => {
         updated[symbol.replace('.BK', '')] = numPrice;
       }
       try {
-        localStorage.setItem('alphatrader_live_prices_v3', JSON.stringify(updated));
+        localStorage.setItem('alphatrader_live_prices_v4', JSON.stringify(updated));
       } catch {}
       return updated;
     });

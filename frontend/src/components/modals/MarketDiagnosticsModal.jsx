@@ -17,7 +17,7 @@ export const MarketDiagnosticsModal = () => {
   const {
     isMarketModalOpen,
     setIsMarketModalOpen,
-    activeHoldings,
+    positions,
     livePrices,
     liveRates,
     priceSources,
@@ -30,8 +30,11 @@ export const MarketDiagnosticsModal = () => {
     handleSaveGoogleSheetSettings,
     syncMarketData,
     isSyncing,
+    displayCurrency,
     formatCurrency
   } = useAppData();
+
+  const activeHoldings = (positions || []).filter(p => p.qtyHeld > 0);
 
   const [editingPrices, setEditingPrices] = useState({});
   const [testingScript, setTestingScript] = useState(false);
@@ -79,9 +82,20 @@ export const MarketDiagnosticsModal = () => {
       )
     },
     {
+      title: 'Qty',
+      dataIndex: 'qtyHeld',
+      key: 'qtyHeld',
+      align: 'right',
+      render: (qty) => (
+        <span className="financial-num">
+          {Number(qty || 0).toLocaleString(undefined, { maximumFractionDigits: 4 })}
+        </span>
+      )
+    },
+    {
       title: 'Avg Cost',
-      dataIndex: 'avgPrice',
-      key: 'avgPrice',
+      dataIndex: 'wac',
+      key: 'wac',
       align: 'right',
       render: (val, record) => (
         <span className="financial-num" style={{ color: 'var(--text-secondary)' }}>
@@ -91,13 +105,27 @@ export const MarketDiagnosticsModal = () => {
     },
     {
       title: 'Market Price',
-      key: 'currentPrice',
+      key: 'livePrice',
       align: 'right',
       render: (_, record) => (
         <span className="financial-num" style={{ color: record.hasLivePrice ? '#00f2fe' : '#f59e0b', fontWeight: 700 }}>
-          {formatCurrency(record.currentPrice, record.currency)}
+          {formatCurrency(record.livePrice, record.currency)}
         </span>
       )
+    },
+    {
+      title: `Unrealized P&L (${displayCurrency || 'THB'})`,
+      key: 'unrealizedPnLConverted',
+      align: 'right',
+      render: (_, record) => {
+        const pnl = record.unrealizedPnLConverted || 0;
+        const isPos = pnl >= 0;
+        return (
+          <span className="financial-num" style={{ color: isPos ? '#10b981' : '#ef4444', fontWeight: 600 }}>
+            {isPos ? '+' : ''}{formatCurrency(pnl, displayCurrency || 'THB')}
+          </span>
+        );
+      }
     },
     {
       title: 'Source',
@@ -122,7 +150,7 @@ export const MarketDiagnosticsModal = () => {
       render: (_, record) => {
         const clean = String(record.assetName || '').toUpperCase().trim();
         const isManual = manualPrices?.[clean] !== undefined;
-        const inputVal = editingPrices[clean] !== undefined ? editingPrices[clean] : record.currentPrice;
+        const inputVal = editingPrices[clean] !== undefined ? editingPrices[clean] : record.livePrice;
 
         return (
           <Space size={6}>
@@ -139,7 +167,7 @@ export const MarketDiagnosticsModal = () => {
               type="primary"
               ghost
               icon={<EditOutlined />}
-              onClick={() => updateManualPrice(clean, editingPrices[clean] ?? record.currentPrice)}
+              onClick={() => updateManualPrice(clean, editingPrices[clean] ?? record.livePrice)}
             >
               Set
             </Button>
