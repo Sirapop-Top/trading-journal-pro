@@ -20,6 +20,11 @@ function doGet(e) {
     var rng = (e && e.parameter && e.parameter.range) ? e.parameter.range : "1y";
     return ContentService.createTextOutput(JSON.stringify(getHistory(syms, rng)))
       .setMimeType(ContentService.MimeType.JSON);
+  } else if (action === "validateTicker") {
+    var vSym = (e && e.parameter && e.parameter.symbol) ? e.parameter.symbol : "";
+    var vType = (e && e.parameter && e.parameter.assetType) ? e.parameter.assetType : "";
+    return ContentService.createTextOutput(JSON.stringify(validateTicker(vSym, vType)))
+      .setMimeType(ContentService.MimeType.JSON);
   }
   
   return ContentService.createTextOutput(JSON.stringify({ error: "Invalid action" }))
@@ -1353,9 +1358,9 @@ function buildJournalRow(headers, newRowIdx, trade) {
   return rowValues;
 }
 
-// Atomic Batch Write for adding trade
+// Atomic Batch Write for adding trade + immediate live price fetch for the newly added stock
 function addTrade(trade) {
-  ensureTableStructure();
+  try { ensureTableStructure(); } catch (e) {}
   
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName("Journal");
@@ -1366,7 +1371,23 @@ function addTrade(trade) {
   var headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
   var rowValues = buildJournalRow(headers, newRowIdx, trade);
   sheet.getRange(newRowIdx, 1, 1, rowValues.length).setValues([rowValues]);
-  return { success: true };
+
+  var assetName = String(trade.assetName || "").trim().toUpperCase().replace(/:S1X|:SHORT/gi, "");
+  var livePrices = {};
+  var liveRates = null;
+  if (assetName) {
+    try {
+      var tMap = {};
+      var cMap = {};
+      tMap[assetName] = trade.assetType || "Thai Stock";
+      cMap[assetName] = trade.currency || "THB";
+      var market = fetchMarketPrices([assetName], tMap, cMap);
+      livePrices = market.livePrices || {};
+      liveRates = market.liveRates || null;
+    } catch (mErr) {}
+  }
+
+  return { success: true, livePrices: livePrices, liveRates: liveRates };
 }
 
 function deleteTrade(tradeId) {
@@ -2320,16 +2341,36 @@ function addTradesBatch(trades) {
     var headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
     
     var batchRows = [];
+    var newAssets = [];
+    var tMap = {};
+    var cMap = {};
     for (var i = 0; i < trades.length; i++) {
       var rowIdx = lastRow + 1 + i;
       var rowValues = buildJournalRow(headers, rowIdx, trades[i]);
       batchRows.push(rowValues);
+      var aName = String(trades[i].assetName || "").trim().toUpperCase().replace(/:S1X|:SHORT/gi, "");
+      if (aName && newAssets.indexOf(aName) === -1) {
+        newAssets.push(aName);
+        tMap[aName] = trades[i].assetType || "Thai Stock";
+        cMap[aName] = trades[i].currency || "THB";
+      }
     }
     
     if (batchRows.length > 0) {
       sheet.getRange(lastRow + 1, 1, batchRows.length, headers.length).setValues(batchRows);
     }
-    return { success: true, count: batchRows.length };
+
+    var livePrices = {};
+    var liveRates = null;
+    if (newAssets.length > 0) {
+      try {
+        var market = fetchMarketPrices(newAssets, tMap, cMap);
+        livePrices = market.livePrices || {};
+        liveRates = market.liveRates || null;
+      } catch (mErr) {}
+    }
+
+    return { success: true, count: batchRows.length, livePrices: livePrices, liveRates: liveRates };
   } catch (err) {
     return { success: false, error: err.toString() };
   } finally {

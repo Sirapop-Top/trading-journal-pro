@@ -51,6 +51,33 @@ export const useTradeActions = ({
       checkedTicker: tickerUpper
     });
 
+    const storeValidatedLivePrice = (rawSym, res) => {
+      const liveNum = res && res.price !== undefined && res.price !== null ? parseFloat(res.price) : NaN;
+      if (!isNaN(liveNum) && liveNum > 0) {
+        const cleanSym = String(rawSym || '').replace(/:S1X|:SHORT/gi, '').replace(/\.BK$|-USD$/i, '').trim().toUpperCase();
+        const yahooTicker = String(res.ticker || rawSym || '').trim().toUpperCase();
+        journal.setLivePrices(prev => {
+          const next = {
+            ...prev,
+            [cleanSym]: liveNum,
+            [yahooTicker]: liveNum,
+            [`${cleanSym}.BK`]: liveNum
+          };
+          try {
+            localStorage.setItem('alphatrader_live_prices_v4', JSON.stringify(next));
+          } catch {}
+          return next;
+        });
+        if (journal.setPriceSources) {
+          journal.setPriceSources(prev => ({
+            ...prev,
+            [cleanSym]: 'yahoo',
+            [yahooTicker]: 'yahoo'
+          }));
+        }
+      }
+    };
+
     try {
       const scriptUrl = localStorage.getItem('google_apps_script_url');
       if (!scriptUrl) {
@@ -59,6 +86,7 @@ export const useTradeActions = ({
       const result = await validateTickerApi(scriptUrl, resolvedSymbol, assetType);
 
       if (result.valid) {
+        storeValidatedLivePrice(tickerUpper, result);
         setTickerValidation({
           status: 'success',
           message: result.message,
@@ -82,7 +110,7 @@ export const useTradeActions = ({
       });
       message.error('Could not connect to verification service.');
     }
-  }, [setTickerValidation, tradeForm]);
+  }, [journal, setTickerValidation, tradeForm]);
 
   // Log new trade
   const handleAddTrade = useCallback(async (values) => {
@@ -94,6 +122,33 @@ export const useTradeActions = ({
     }
     const symbol = resolvedSymbol;
     const scriptUrl = localStorage.getItem('google_apps_script_url');
+
+    const saveLivePriceEntry = (rawSym, res) => {
+      const liveNum = res && res.price !== undefined && res.price !== null ? parseFloat(res.price) : NaN;
+      if (!isNaN(liveNum) && liveNum > 0) {
+        const cleanSym = String(rawSym || '').replace(/:S1X|:SHORT/gi, '').replace(/\.BK$|-USD$/i, '').trim().toUpperCase();
+        const yahooTicker = String(res.ticker || rawSym || '').trim().toUpperCase();
+        journal.setLivePrices(prev => {
+          const next = {
+            ...prev,
+            [cleanSym]: liveNum,
+            [yahooTicker]: liveNum,
+            [`${cleanSym}.BK`]: liveNum
+          };
+          try {
+            localStorage.setItem('alphatrader_live_prices_v4', JSON.stringify(next));
+          } catch {}
+          return next;
+        });
+        if (journal.setPriceSources) {
+          journal.setPriceSources(prev => ({
+            ...prev,
+            [cleanSym]: 'yahoo',
+            [yahooTicker]: 'yahoo'
+          }));
+        }
+      }
+    };
 
     // Validate ticker before adding trade
     if (tickerValidation.status !== 'success' || tickerValidation.checkedTicker !== symbol) {
@@ -116,6 +171,7 @@ export const useTradeActions = ({
           message.error(`Verification Failed: ${result.message}`);
           return;
         } else {
+          saveLivePriceEntry(symbol, result);
           setTickerValidation({
             status: 'success',
             message: result.message,
@@ -176,14 +232,30 @@ export const useTradeActions = ({
         throw new Error('Apps Script URL is missing. Set it in Settings.');
       }
 
-      await addTradeApi(scriptUrl, tradePayload);
+      const addRes = await addTradeApi(scriptUrl, tradePayload);
+      if (addRes && addRes.livePrices && Object.keys(addRes.livePrices).length > 0) {
+        journal.setLivePrices(prev => {
+          const next = { ...prev, ...addRes.livePrices };
+          try {
+            localStorage.setItem('alphatrader_live_prices_v4', JSON.stringify(next));
+          } catch {}
+          return next;
+        });
+      }
+      if (addRes && addRes.liveRates && journal.setLiveRates) {
+        journal.setLiveRates(addRes.liveRates);
+      }
+
       message.success('Trade logged successfully to Google Sheets!');
 
       setIsTradeModalOpen(false);
       tradeForm.resetFields();
       setTickerValidation({ status: 'idle', message: '', checkedTicker: '' });
 
-      journal.fetchData();
+      await journal.fetchData();
+      if (journal.syncMarketData) {
+        await journal.syncMarketData(true);
+      }
     } catch (error) {
       console.error('Error logging trade:', error);
       message.error(error.message || 'Failed to log trade to Google Sheets.');

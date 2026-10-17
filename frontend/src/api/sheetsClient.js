@@ -246,10 +246,40 @@ export const postAction = async (scriptUrl, action, data = {}) => {
 };
 
 /**
- * Validate a ticker symbol on Yahoo Finance through Apps Script
+ * Validate a ticker symbol on Yahoo Finance through Apps Script (or local Yahoo bridge)
+ * Also extracts the live Yahoo Finance price so newly bought stocks are priced immediately.
  */
 export const validateTickerApi = async (scriptUrl, symbol, assetType) => {
-  return await postAction(scriptUrl, 'validateTicker', { symbol, assetType });
+  if (scriptUrl) {
+    const res = await postAction(scriptUrl, 'validateTicker', { symbol, assetType });
+    if (res && res.valid && (res.price === undefined || res.price === null) && typeof res.message === 'string') {
+      const m = res.message.match(/Live Price:\s*([0-9.]+)/i);
+      if (m && !isNaN(parseFloat(m[1]))) {
+        res.price = parseFloat(m[1]);
+      }
+    }
+    return res;
+  }
+
+  // Fallback to local Vite Yahoo Finance bridge if Apps Script URL is not set
+  const clean = String(symbol || '').replace(/:S1X|:SHORT/gi, '').trim().toUpperCase();
+  const typeLower = String(assetType || '').toLowerCase();
+  const yahooSym = typeLower.includes('crypto')
+    ? (clean.endsWith('-USD') ? clean : `${clean}-USD`)
+    : (typeLower.includes('thai') ? (clean.endsWith('.BK') ? clean : `${clean}.BK`) : clean);
+
+  const live = await fetchYahooLiveBrowser([{ assetName: clean, assetType }]);
+  const price = live?.livePrices?.[yahooSym] ?? live?.livePrices?.[clean];
+  if (price !== undefined && !isNaN(price) && price > 0) {
+    return {
+      valid: true,
+      ticker: yahooSym,
+      price,
+      message: `Ticker '${yahooSym}' verified on Yahoo Finance. Live Price: ${price}`
+    };
+  }
+
+  throw new Error('Google Apps Script URL is missing.');
 };
 
 /**
