@@ -21,6 +21,8 @@ export const CashStatementTable = () => {
 
   const [searchText, setSearchText] = useState('');
   const [kindFilter, setKindFilter] = useState('All');
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(15);
 
   const filteredStatement = useMemo(() => {
     return cashStatement.filter(item => {
@@ -213,13 +215,19 @@ export const CashStatementTable = () => {
             placeholder="Search by note or asset..."
             prefix={<SearchOutlined style={{ color: 'var(--text-muted)' }} />}
             value={searchText}
-            onChange={e => setSearchText(e.target.value)}
+            onChange={e => {
+              setSearchText(e.target.value);
+              setCurrentPage(1);
+            }}
             style={{ width: 220 }}
             allowClear
           />
           <Select
             value={kindFilter}
-            onChange={setKindFilter}
+            onChange={val => {
+              setKindFilter(val);
+              setCurrentPage(1);
+            }}
             style={{ width: 150 }}
           >
             <Option value="All">All Transactions</Option>
@@ -249,7 +257,17 @@ export const CashStatementTable = () => {
         dataSource={filteredStatement}
         columns={columns}
         rowKey="id"
-        pagination={{ pageSize: 15, showSizeChanger: true }}
+        pagination={{
+          current: currentPage,
+          pageSize: pageSize,
+          showSizeChanger: true,
+          pageSizeOptions: ['10', '15', '25', '50', '100'],
+          onChange: (page, size) => {
+            setCurrentPage(page);
+            setPageSize(size);
+          },
+          showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} transactions`
+        }}
         size="small"
         scroll={{ x: 800 }}
       />

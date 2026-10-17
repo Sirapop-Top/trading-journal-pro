@@ -24,15 +24,31 @@ const { Text } = Typography;
 const { Option } = Select;
 
 const BENCHMARKS = [
-  { label: '🇹🇭 SET Index (^SET.BK)', value: '^SET.BK' },
-  { label: '🇺🇸 S&P 500 (^GSPC)', value: '^GSPC' },
-  { label: '🪙 Bitcoin (BTC-USD)', value: 'BTC-USD' }
+  {
+    label: '🇹🇭 SET50 ETF Proxy (TDEX.BK)',
+    value: '^SET.BK',
+    source: 'Yahoo Finance (TDEX.BK — ThaiDEX SET50 ETF on SET)',
+    formatRaw: (v) => `฿${Number(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+  },
+  {
+    label: '🇺🇸 S&P 500 (^GSPC)',
+    value: '^GSPC',
+    source: 'Yahoo Finance (^GSPC — S&P 500 Index)',
+    formatRaw: (v) => `${Number(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} pts`
+  },
+  {
+    label: '🪙 Bitcoin (BTC-USD)',
+    value: 'BTC-USD',
+    source: 'Yahoo Finance (BTC-USD) & Binance (BTCUSDT)',
+    formatRaw: (v) => `$${Number(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+  }
 ];
 
 export const EquityDrawdownChart = () => {
   const {
     equityCurveData,
     normalizedBenchmark,
+    historicalPrices,
     selectedBenchmark,
     setSelectedBenchmark,
     fetchHistoricalData,
@@ -46,16 +62,38 @@ export const EquityDrawdownChart = () => {
   // On mount or when benchmark changes, fetch benchmark historical prices
   useEffect(() => {
     if (selectedBenchmark) {
-      fetchHistoricalData([selectedBenchmark], '5y');
+      fetchHistoricalData([selectedBenchmark], '2y');
     }
   }, [selectedBenchmark, fetchHistoricalData]);
 
-  // Combine equity curve series with normalized benchmark data
+  const activeBenchmarkMeta = BENCHMARKS.find(b => b.value === selectedBenchmark) || BENCHMARKS[0];
+  const rawBenchmarkSeries = historicalPrices?.[selectedBenchmark] || [];
+  const latestRawPoint = rawBenchmarkSeries.length > 0 ? rawBenchmarkSeries[rawBenchmarkSeries.length - 1] : null;
+
+  // Build date -> actual market close map (with forward-fill across weekends/holidays)
+  const rawPriceByDate = {};
+  if (rawBenchmarkSeries.length > 0 && series.length > 0) {
+    const sortedRaw = [...rawBenchmarkSeries].sort((a, b) => a.date.localeCompare(b.date));
+    let lastKnownClose = sortedRaw[0]?.close ?? null;
+    let rawIdx = 0;
+    for (const pt of series) {
+      while (rawIdx < sortedRaw.length && sortedRaw[rawIdx].date <= pt.date) {
+        if (sortedRaw[rawIdx].close > 0) {
+          lastKnownClose = sortedRaw[rawIdx].close;
+        }
+        rawIdx++;
+      }
+      rawPriceByDate[pt.date] = lastKnownClose;
+    }
+  }
+
+  // Combine equity curve series with normalized benchmark data and actual market price
   const combinedChartData = series.map(pt => {
     const bVal = normalizedBenchmark?.[pt.date];
     return {
       ...pt,
-      benchmark: bVal !== undefined ? bVal : null
+      benchmark: bVal !== undefined ? bVal : null,
+      benchmarkRaw: rawPriceByDate[pt.date] ?? null
     };
   });
 
@@ -78,7 +116,7 @@ export const EquityDrawdownChart = () => {
               value={selectedBenchmark}
               onChange={setSelectedBenchmark}
               size="small"
-              style={{ width: 190 }}
+              style={{ width: 220 }}
             >
               {BENCHMARKS.map(b => (
                 <Option key={b.value} value={b.value}>{b.label}</Option>
@@ -87,7 +125,7 @@ export const EquityDrawdownChart = () => {
             <Button
               size="small"
               icon={<ReloadOutlined spin={isLoadingHistory} />}
-              onClick={() => fetchHistoricalData([selectedBenchmark], '5y')}
+              onClick={() => fetchHistoricalData([selectedBenchmark], '2y')}
               disabled={isLoadingHistory}
             >
               Sync Index
@@ -156,9 +194,19 @@ export const EquityDrawdownChart = () => {
 
       {/* Main Equity Curve & Benchmark Chart */}
       <div style={{ marginBottom: 12 }}>
-        <Text strong style={{ fontSize: 13, color: '#94a3b8', display: 'block', marginBottom: 8 }}>
-          EQUITY GROWTH VS BENCHMARK (NORMALIZED 100)
-        </Text>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8, marginBottom: 8 }}>
+          <Text strong style={{ fontSize: 13, color: '#94a3b8' }}>
+            EQUITY GROWTH VS BENCHMARK (NORMALIZED BASE = 100 ON START DATE)
+          </Text>
+          <Text style={{ fontSize: 11, color: '#cbd5e1' }}>
+            Source: <span style={{ color: '#f59e0b', fontWeight: 600 }}>{activeBenchmarkMeta.source}</span>
+            {latestRawPoint && (
+              <span style={{ marginLeft: 8, color: '#38bdf8', fontFamily: 'var(--font-family-mono)' }}>
+                • Latest Close ({latestRawPoint.date}): {activeBenchmarkMeta.formatRaw(latestRawPoint.close)}
+              </span>
+            )}
+          </Text>
+        </div>
         <div style={{ height: 260, width: '100%' }}>
           {series.length === 0 ? (
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text-muted)' }}>
@@ -196,9 +244,13 @@ export const EquityDrawdownChart = () => {
                     borderRadius: 8,
                     fontSize: 12
                   }}
-                  formatter={(val, name) => {
+                  formatter={(val, name, item) => {
                     if (name === 'Portfolio Equity') return [formatCurrency(val, displayCurrency, isCensored), name];
-                    if (name === 'Benchmark') return [`${Number(val).toFixed(2)} pts`, selectedBenchmark];
+                    if (name === 'Benchmark') {
+                      const rawClose = item?.payload?.benchmarkRaw;
+                      const rawStr = rawClose ? ` (Market: ${activeBenchmarkMeta.formatRaw(rawClose)})` : '';
+                      return [`${Number(val).toFixed(2)} pts${rawStr}`, activeBenchmarkMeta.label];
+                    }
                     return [val, name];
                   }}
                 />

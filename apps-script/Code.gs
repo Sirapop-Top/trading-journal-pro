@@ -2388,11 +2388,16 @@ function getHistory(symbols, range) {
   
   for (var i = 0; i < symbols.length; i++) {
     var sym = symbols[i];
-    var cacheKey = "HIST_" + sym + "_" + targetRange;
+    var cacheKey = "HIST_V2_" + sym + "_" + targetRange;
     var cached = cache.get(cacheKey);
     if (cached) {
       try {
-        result[sym] = JSON.parse(cached);
+        var parsed = JSON.parse(cached);
+        if (Array.isArray(parsed) && parsed.length > 5) {
+          result[sym] = parsed;
+        } else {
+          uncachedSymbols.push(sym);
+        }
       } catch (e) {
         uncachedSymbols.push(sym);
       }
@@ -2411,7 +2416,12 @@ function getHistory(symbols, range) {
   };
   
   var requests = uncachedSymbols.map(function(sym) {
-    var resolvedSym = resolveYahooSymbol(sym, "", "");
+    var cleanUpper = String(sym || "").trim().toUpperCase();
+    // Yahoo Finance discontinued multi-day candles for ^SET.BK (returns only 1 frozen point);
+    // use TDEX.BK (ThaiDEX SET50 ETF on SET in THB) for accurate daily Thai market benchmark history
+    var resolvedSym = (cleanUpper === "^SET.BK" || cleanUpper === "^SET50.BK")
+      ? "TDEX.BK"
+      : resolveYahooSymbol(sym, "", "");
     return {
       url: "https://query1.finance.yahoo.com/v8/finance/chart/" + encodeURIComponent(resolvedSym) + "?range=" + targetRange + "&interval=1d",
       headers: defaultHeaders,
@@ -2441,8 +2451,8 @@ function getHistory(symbols, range) {
             result[symOrig] = series;
             
             var strVal = JSON.stringify(series);
-            if (strVal.length < 100000) {
-              cache.put("HIST_" + symOrig + "_" + targetRange, strVal, 21600);
+            if (series.length > 5 && strVal.length < 100000) {
+              cache.put("HIST_V2_" + symOrig + "_" + targetRange, strVal, 21600);
             }
           }
         } catch (e) {}

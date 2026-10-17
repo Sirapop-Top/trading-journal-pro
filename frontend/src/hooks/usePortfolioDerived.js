@@ -25,6 +25,7 @@ export const usePortfolioDerived = ({
   journalAssetTypeFilter = 'All',
   journalSearch = '',
   positionsTypeFilter = 'All',
+  positionsStatusFilter = 'All',
   positionsSearch = '',
   allocationDimension = 'type',
   pnlDimension = 'strategy',
@@ -93,9 +94,15 @@ export const usePortfolioDerived = ({
     return computePositions(filteredTrades, livePrices, liveRates, displayCurrency, { dateRange });
   }, [filteredTrades, livePrices, liveRates, displayCurrency, dateRange]);
 
-  // Render positions applying the search and filter query
+  // Render positions applying the search, category, and status (Active/Closed) filter
   const renderedPositions = useMemo(() => {
     let result = positions;
+
+    if (positionsStatusFilter === 'Active') {
+      result = result.filter(p => p.qtyHeld > 0);
+    } else if (positionsStatusFilter === 'Closed') {
+      result = result.filter(p => p.qtyHeld <= 0);
+    }
 
     if (positionsTypeFilter !== 'All') {
       result = result.filter(p => p.assetType === positionsTypeFilter);
@@ -107,7 +114,7 @@ export const usePortfolioDerived = ({
     }
 
     return result;
-  }, [positions, positionsTypeFilter, positionsSearch]);
+  }, [positions, positionsStatusFilter, positionsTypeFilter, positionsSearch]);
 
   // Aggregate portfolios KPIs (summing up from active holdings and realized gains)
   const kpis = useMemo(() => computeKpis(positions), [positions]);

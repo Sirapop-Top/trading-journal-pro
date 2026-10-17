@@ -105,6 +105,51 @@ function yahooFinanceSnapshotPlugin() {
         res.end(JSON.stringify({ ok: false, error: err.message }));
       }
     });
+
+    server.middlewares.use('/api/yahoo-history', async (req, res) => {
+      try {
+        const urlObj = new URL(req.url || '', 'http://localhost');
+        const rawSymbols = urlObj.searchParams.get('symbols') || '';
+        const range = urlObj.searchParams.get('range') || '2y';
+        const requested = rawSymbols.split(',').map(s => s.trim()).filter(Boolean);
+        const history = {};
+
+        for (const sym of requested) {
+          const upper = sym.toUpperCase();
+          const yahooSym = (upper === '^SET.BK' || upper === '^SET50.BK') ? 'TDEX.BK' : sym;
+          try {
+            const chartUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(yahooSym)}?range=${encodeURIComponent(range)}&interval=1d`;
+            const cRes = await fetch(chartUrl, {
+              headers: { 'User-Agent': 'Mozilla/5.0' },
+              signal: AbortSignal.timeout(5000)
+            });
+            if (cRes.ok) {
+              const cData = await cRes.json();
+              const chartRes = cData?.chart?.result?.[0];
+              const ts = chartRes?.timestamp || [];
+              const closes = chartRes?.indicators?.quote?.[0]?.close || [];
+              const series = [];
+              for (let i = 0; i < ts.length; i++) {
+                if (closes[i] !== null && closes[i] !== undefined && !isNaN(closes[i])) {
+                  const dStr = new Date(ts[i] * 1000).toISOString().split('T')[0];
+                  series.push({ date: dStr, close: Math.round(closes[i] * 10000) / 10000 });
+                }
+              }
+              if (series.length > 0) {
+                history[sym] = series;
+              }
+            }
+          } catch {}
+        }
+
+        res.setHeader('Content-Type', 'application/json');
+        res.end(JSON.stringify({ success: true, history }));
+      } catch (err) {
+        res.statusCode = 500;
+        res.setHeader('Content-Type', 'application/json');
+        res.end(JSON.stringify({ success: false, error: err.message, history: {} }));
+      }
+    });
   };
 
   return {
@@ -197,6 +242,7 @@ export default defineConfig({
         ]
       },
       workbox: {
+        maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
         skipWaiting: true,
         clientsClaim: true,
         cleanupOutdatedCaches: true,

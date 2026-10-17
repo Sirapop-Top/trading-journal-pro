@@ -1,4 +1,4 @@
-import { Card, Table, Tag, Typography, Input, Select, Space } from 'antd';
+import { Card, Table, Tag, Typography, Input, Select, Space, Switch } from 'antd';
 import { SearchOutlined } from '@ant-design/icons';
 import { useAppData } from '../../context/AppDataContext.jsx';
 
@@ -12,6 +12,8 @@ export const PositionsTab = () => {
     setPositionsSearch,
     positionsTypeFilter,
     setPositionsTypeFilter,
+    positionsStatusFilter = 'Active',
+    setPositionsStatusFilter,
     renderedPositions,
     kpis,
     isCensored,
@@ -179,17 +181,29 @@ export const PositionsTab = () => {
               prefix={<SearchOutlined style={{ color: 'var(--text-muted)' }} />}
               allowClear
             />
-            <Select
-              value={positionsTypeFilter}
-              onChange={val => setPositionsTypeFilter(val)}
-              style={{ width: '100%' }}
-              dropdownStyle={{ background: 'var(--bg-card)' }}
-            >
-              <Option value="All">All Categories</Option>
-              <Option value="Thai Stock">Thai Stock</Option>
-              <Option value="Global Stock">Global Stock</Option>
-              <Option value="Crypto">Crypto</Option>
-            </Select>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <Select
+                value={positionsTypeFilter}
+                onChange={val => setPositionsTypeFilter(val)}
+                style={{ flex: 1 }}
+                dropdownStyle={{ background: 'var(--bg-card)' }}
+              >
+                <Option value="All">All Categories</Option>
+                <Option value="Thai Stock">Thai Stock</Option>
+                <Option value="Global Stock">Global Stock</Option>
+                <Option value="Crypto">Crypto</Option>
+              </Select>
+              <Select
+                value={positionsStatusFilter}
+                onChange={val => setPositionsStatusFilter && setPositionsStatusFilter(val)}
+                style={{ flex: 1 }}
+                dropdownStyle={{ background: 'var(--bg-card)' }}
+              >
+                <Option value="Active">Active Only</Option>
+                <Option value="All">Include Closed</Option>
+                <Option value="Closed">Closed Only</Option>
+              </Select>
+            </div>
           </Space>
         </Card>
 
@@ -312,6 +326,26 @@ export const PositionsTab = () => {
             <Option value="Global Stock">Global Stock</Option>
             <Option value="Crypto">Crypto</Option>
           </Select>
+        </div>
+        <div>
+          <Text type="secondary" style={{ fontSize: '12px', display: 'block', marginBottom: '4px', fontWeight: 600 }}>STATUS</Text>
+          <Select
+            value={positionsStatusFilter}
+            onChange={val => setPositionsStatusFilter && setPositionsStatusFilter(val)}
+            style={{ width: 200 }}
+          >
+            <Option value="Active">Active Only (Hide Closed)</Option>
+            <Option value="All">All Positions (Include Closed)</Option>
+            <Option value="Closed">Closed Only</Option>
+          </Select>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingTop: 18 }}>
+          <Switch
+            size="small"
+            checked={positionsStatusFilter === 'Active'}
+            onChange={(checked) => setPositionsStatusFilter && setPositionsStatusFilter(checked ? 'Active' : 'All')}
+          />
+          <Text style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>Hide Closed</Text>
         </div>
       </Space>
 

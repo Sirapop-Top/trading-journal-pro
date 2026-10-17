@@ -17,6 +17,7 @@ import {
   computeStrategyDetailedStats
 } from '../lib/analyticsEngine.js';
 import { fetchHistoryApi } from '../api/sheetsClient.js';
+import yahooBenchmarkSnapshot from '../data/yahooBenchmarkSnapshot.json';
 
 const AppDataContext = createContext(null);
 
@@ -66,6 +67,7 @@ export const AppDataProvider = ({ children }) => {
   const [journalAssetTypeFilter, setJournalAssetTypeFilter] = useState('All');
   const [journalSearch, setJournalSearch] = useState('');
   const [positionsTypeFilter, setPositionsTypeFilter] = useState('All');
+  const [positionsStatusFilter, setPositionsStatusFilter] = useState('Active');
   const [positionsSearch, setPositionsSearch] = useState('');
   const [allocationDimension, setAllocationDimension] = useState('type'); // 'type' | 'name'
   const [pnlDimension, setPnlDimension] = useState('strategy'); // 'strategy' | 'type' | 'name'
@@ -96,6 +98,7 @@ export const AppDataProvider = ({ children }) => {
     journalAssetTypeFilter,
     journalSearch,
     positionsTypeFilter,
+    positionsStatusFilter,
     positionsSearch,
     allocationDimension,
     pnlDimension,
@@ -191,7 +194,9 @@ export const AppDataProvider = ({ children }) => {
 
   // 6.3 Historical Prices & Benchmark State
   const [selectedBenchmark, setSelectedBenchmark] = useState('^SET.BK');
-  const [historicalPrices, setHistoricalPrices] = useState({});
+  const [historicalPrices, setHistoricalPrices] = useState(() => (
+    import.meta.env?.VITEST ? {} : (yahooBenchmarkSnapshot?.history || {})
+  ));
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
 
   const fetchHistoricalData = useCallback(async (symbols = [], range = '1y') => {
@@ -199,11 +204,9 @@ export const AppDataProvider = ({ children }) => {
     setIsLoadingHistory(true);
     try {
       const scriptUrl = localStorage.getItem('google_apps_script_url');
-      if (scriptUrl) {
-        const res = await fetchHistoryApi(scriptUrl, symbols, range);
-        if (res && res.success && res.history) {
-          setHistoricalPrices(prev => ({ ...prev, ...res.history }));
-        }
+      const res = await fetchHistoryApi(scriptUrl, symbols, range);
+      if (res && res.success && res.history) {
+        setHistoricalPrices(prev => ({ ...prev, ...res.history }));
       }
     } catch (e) {
       console.error('fetchHistoricalData error:', e);
@@ -294,6 +297,8 @@ export const AppDataProvider = ({ children }) => {
     setJournalSearch,
     positionsTypeFilter,
     setPositionsTypeFilter,
+    positionsStatusFilter,
+    setPositionsStatusFilter,
     positionsSearch,
     setPositionsSearch,
     allocationDimension,
