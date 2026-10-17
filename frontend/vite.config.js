@@ -1,11 +1,68 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { VitePWA } from 'vite-plugin-pwa';
+import fs from 'node:fs';
+import path from 'node:path';
+
+function yahooFinanceSnapshotPlugin() {
+  return {
+    name: 'yahoo-finance-snapshot',
+    async buildStart() {
+      if (process.env.VITEST) return;
+      try {
+        const snapshotPath = path.resolve(process.cwd(), 'src/data/yahooPricesSnapshot.json');
+        if (!fs.existsSync(snapshotPath)) return;
+        const existing = JSON.parse(fs.readFileSync(snapshotPath, 'utf8'));
+        const prices = { ...(existing.livePrices || {}) };
+        const rates = { ...(existing.liveRates || { THB: 1.0, USD: 32.69, EUR: 38.04 }) };
+
+        // Refresh core user holdings + FX rates in a fast 1.5s batch call
+        const coreSymbols = [
+          'BJC.BK', 'KCE.BK', 'JMART.BK', 'ROJNA.BK', 'PTG.BK', 'IVL.BK', 'LH.BK',
+          'MSTR', 'CRCL', 'META', 'HOOD', 'USDTHB=X', 'EURTHB=X'
+        ];
+        const url = `https://query1.finance.yahoo.com/v8/finance/spark?symbols=${encodeURIComponent(coreSymbols.join(','))}&range=5d&interval=1d`;
+        const res = await fetch(url, {
+          headers: { 'User-Agent': 'Mozilla/5.0' },
+          signal: AbortSignal.timeout(4000)
+        });
+        if (res.ok) {
+          const data = await res.json();
+          for (const sym of coreSymbols) {
+            const closeArr = (data[sym]?.close || []).filter(v => v !== null && !isNaN(v) && v > 0);
+            if (closeArr.length > 0) {
+              const latest = closeArr[closeArr.length - 1];
+              if (sym === 'USDTHB=X') rates.USD = latest;
+              else if (sym === 'EURTHB=X') rates.EUR = latest;
+              else {
+                prices[sym] = latest;
+                if (sym.endsWith('.BK')) {
+                  prices[sym.replace('.BK', '')] = latest;
+                }
+              }
+            }
+          }
+          fs.writeFileSync(
+            snapshotPath,
+            JSON.stringify({ updatedAt: new Date().toISOString(), liveRates: rates, livePrices: prices }, null, 2)
+          );
+        }
+      } catch {
+        // Keep existing snapshot on offline/timeout
+      }
+    }
+  };
+}
 
 // https://vite.dev/config/
 export default defineConfig({
   base: './',
+  test: {
+    testTimeout: 20000,
+    environment: 'jsdom'
+  },
   plugins: [
+    yahooFinanceSnapshotPlugin(),
     react(),
     VitePWA({
       registerType: 'autoUpdate',

@@ -136,27 +136,63 @@ export const fetchBinanceCryptoPrices = async (symbols = []) => {
 };
 
 /**
- * Fetch live market prices and rates from Apps Script
- * Tries POST action getData first (bypasses browser CORS & redirect issues),
- * falling back gracefully to GET if necessary.
+ * Fetch live market prices and rates from Apps Script.
+ * Uses GET ?action=getData first (compatible with both V.เก่า and V.2.6 Apps Script),
+ * falling back to POST if needed.
  */
 export const fetchLiveData = async (scriptUrl) => {
   if (!scriptUrl) return null;
   const cleanUrl = scriptUrl.trim();
-  
-  // Attempt POST first: Content-Type: text/plain prevents CORS preflight and follows Apps Script redirects seamlessly
+  const separator = cleanUrl.includes('?') ? '&' : '?';
+
   try {
-    const postRes = await postAction(cleanUrl, 'getData');
-    if (postRes && (postRes.livePrices || postRes.liveRates || postRes.trades || postRes.syncTime)) {
-      return postRes;
+    const getRes = await callGoogleAppsScript(`${cleanUrl}${separator}action=getData`);
+    if (getRes && (getRes.livePrices || getRes.liveRates || getRes.trades || getRes.syncTime)) {
+      return getRes;
     }
-  } catch (postErr) {
-    console.warn('fetchLiveData POST attempt failed, trying GET fallback:', postErr);
+  } catch (getErr) {
+    console.warn('fetchLiveData GET attempt failed, trying POST fallback:', getErr);
   }
 
-  // Fallback to GET
-  const separator = cleanUrl.includes('?') ? '&' : '?';
-  return await callGoogleAppsScript(`${cleanUrl}${separator}action=getData`);
+  const postRes = await postAction(cleanUrl, 'getData');
+  return postRes;
+};
+
+/**
+ * Diagnostic helper to test Google Apps Script Web App connection and live price delivery.
+ */
+export const testGoogleAppsScript = async (scriptUrl) => {
+  if (!scriptUrl || !scriptUrl.trim()) {
+    return { ok: false, error: 'Apps Script URL is empty. Please enter your Web App URL.' };
+  }
+  const cleanUrl = scriptUrl.trim();
+  if (!cleanUrl.startsWith('https://script.google.com')) {
+    return { ok: false, error: 'Invalid URL format. The Web App URL must start with https://script.google.com' };
+  }
+
+  try {
+    const data = await fetchLiveData(cleanUrl);
+    if (!data) {
+      return { ok: false, error: 'Web App returned empty response.' };
+    }
+    if (data.error) {
+      return { ok: false, error: data.error };
+    }
+    return {
+      ok: true,
+      schemaVersion: data.schemaVersion || '1.0',
+      livePrices: data.livePrices || {},
+      liveRates: data.liveRates || {},
+      tradesCount: Array.isArray(data.trades) ? data.trades.length : 0,
+      priceDiagnostics: data.priceDiagnostics || {}
+    };
+  } catch (err) {
+    let errorHelp = err.message || String(err);
+    if (errorHelp.includes('Failed to fetch') || errorHelp.includes('NetworkError') || errorHelp.includes('CORS')) {
+      errorHelp = 'Connection blocked by Google authentication (CORS). Please verify that in Google Apps Script > Deploy > Manage deployments, "Who has access" is set to "Anyone" (not "Only myself").';
+    }
+    return { ok: false, error: errorHelp };
+  }
 };
 
 /**
@@ -275,8 +311,24 @@ export const addTradesBatchApi = async (scriptUrl, trades) => {
 };
 
 export const fetchHistoryApi = async (scriptUrl, symbols, range = '1y') => {
+  if (!scriptUrl) return { success: false, history: {} };
+  const cleanUrl = scriptUrl.trim();
+  const separator = cleanUrl.includes('?') ? '&' : '?';
+  const symParam = Array.isArray(symbols) ? symbols.join(',') : String(symbols || '');
+
   try {
-    return await postAction(scriptUrl, 'getHistory', { symbols, range });
+    const getRes = await callGoogleAppsScript(
+      `${cleanUrl}${separator}action=getHistory&symbols=${encodeURIComponent(symParam)}&range=${encodeURIComponent(range)}`
+    );
+    if (getRes && getRes.history) {
+      return getRes;
+    }
+  } catch (getErr) {
+    console.warn('fetchHistoryApi GET attempt failed, trying POST fallback:', getErr);
+  }
+
+  try {
+    return await postAction(cleanUrl, 'getHistory', { symbols, range });
   } catch (err) {
     console.error('fetchHistoryApi error:', err);
     return { success: false, history: {} };

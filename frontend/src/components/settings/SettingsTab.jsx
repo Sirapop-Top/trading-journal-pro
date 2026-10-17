@@ -43,7 +43,8 @@ export const SettingsTab = () => {
     handleDisablePasscode,
     autoRefresh,
     setAutoRefresh,
-    liveRates
+    liveRates,
+    setIsMarketModalOpen
   } = useAppData();
 
   return (
@@ -233,7 +234,7 @@ export const SettingsTab = () => {
             </div>
 
             <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
-              <strong style={{ color: '#ffffff', minWidth: '160px' }}>Apps Script URL (Write):</strong>
+              <strong style={{ color: '#ffffff', minWidth: '160px' }}>Apps Script URL (Yahoo + Write):</strong>
               <Input 
                 placeholder="" 
                 value={googleAppsScriptUrl} 
@@ -242,7 +243,7 @@ export const SettingsTab = () => {
               />
             </div>
 
-            <div style={{ marginTop: '5px' }}>
+            <div style={{ marginTop: '5px', display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
               <Button 
                 type="primary" 
                 onClick={handleSaveGoogleSheetSettings} 
@@ -250,6 +251,11 @@ export const SettingsTab = () => {
                 style={{ color: '#06080f', fontWeight: 'bold' }}
               >
                 Save Settings & Sync
+              </Button>
+              <Button
+                onClick={() => setIsMarketModalOpen && setIsMarketModalOpen(true)}
+              >
+                Inspect Yahoo Prices & Diagnostics
               </Button>
             </div>
           </div>

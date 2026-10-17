@@ -12,7 +12,8 @@ export const OnboardingScreen = () => {
     setGoogleAppsScriptUrl,
     setIsConnected,
     setAppPasscode,
-    setHasPasscode
+    setHasPasscode,
+    fetchData
   } = useAppData();
 
   return (
@@ -44,7 +45,7 @@ export const OnboardingScreen = () => {
             />
 
             <strong style={{ color: '#ffffff', display: 'block', marginBottom: '4px', fontSize: '14px' }}>
-              2. Paste Apps Script URL: <span style={{ color: 'var(--text-secondary)', fontWeight: 400, fontSize: '12px' }}>(optional — needed for writing trades from mobile)</span>
+              2. Paste Apps Script URL: <span style={{ color: 'var(--text-secondary)', fontWeight: 400, fontSize: '12px' }}>(recommended — needed for live Yahoo Finance stock sync & writing trades)</span>
             </strong>
             <Input.Password
               placeholder=""
@@ -75,6 +76,9 @@ export const OnboardingScreen = () => {
               }
               setIsConnected(true);
               message.success('Connected! Loading your journal...');
+              if (typeof fetchData === 'function') {
+                fetchData();
+              }
             }}
           >
             Connect Journal

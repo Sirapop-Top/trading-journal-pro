@@ -73,12 +73,14 @@ Once the code is pushed, GitHub will automatically build your frontend using Git
 
 ---
 
+
+`javascript
 // ==========================================
 // AlphaTrader — Google Apps Script Backend
-// Schema Version: 2.5 (Yahoo Finance Live Market Fix & Browser UA)
+// Schema Version: 2.6 (Proven Yahoo Finance Live Market Fetch & Safe Schema Init)
 // ==========================================
 
-var SCHEMA_VERSION = "2.5";
+var SCHEMA_VERSION = "2.6";
 
 function doGet(e) {
   var action = e ? e.parameter.action : "";
@@ -681,7 +683,7 @@ function getHeldQty(portfolio, assetName) {
 
 function getDashboardData() {
   try {
-    ensureTableStructure();
+    try { ensureTableStructure(); } catch (structureErr) {}
   
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName("Journal");
@@ -1098,20 +1100,16 @@ function resolveYahooSymbol(assetName, assetType, currency) {
   return clean;
 }
 
-// Fetch Market Prices from Yahoo Finance (via browser User-Agent & query2 fallback) and Binance
+// Fetch Market Prices from Yahoo Finance (using V.เก่า native UrlFetchApp.fetchAll format + spark & query2 fallbacks) and Binance
 function fetchMarketPrices(uniqueAssets, assetTypesMap, assetCurrenciesMap) {
   var livePrices = {};
   var liveRates = { "THB": 1.0, "USD": 32.69, "EUR": 38.04 };
   var priceDiagnostics = {};
 
   try {
-    var defaultHeaders = {
-      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-      "Accept": "application/json"
-    };
     var fetchRequests = [];
-    fetchRequests.push({ url: "https://query1.finance.yahoo.com/v8/finance/chart/USDTHB=X", headers: defaultHeaders, muteHttpExceptions: true });
-    fetchRequests.push({ url: "https://query1.finance.yahoo.com/v8/finance/chart/EURTHB=X", headers: defaultHeaders, muteHttpExceptions: true });
+    fetchRequests.push({ url: "https://query1.finance.yahoo.com/v8/finance/chart/USDTHB=X", muteHttpExceptions: true });
+    fetchRequests.push({ url: "https://query1.finance.yahoo.com/v8/finance/chart/EURTHB=X", muteHttpExceptions: true });
     
     // Sanitize uniqueAssets to remove empty strings or whitespace
     var cleanAssets = [];
@@ -1129,7 +1127,7 @@ function fetchMarketPrices(uniqueAssets, assetTypesMap, assetCurrenciesMap) {
       var cur = (assetCurrenciesMap && assetCurrenciesMap[asset]) || "";
       var symbol = resolveYahooSymbol(asset, type, cur);
       resolvedSymbols.push(symbol);
-      fetchRequests.push({ url: "https://query1.finance.yahoo.com/v8/finance/chart/" + encodeURIComponent(symbol), headers: defaultHeaders, muteHttpExceptions: true });
+      fetchRequests.push({ url: "https://query1.finance.yahoo.com/v8/finance/chart/" + encodeURIComponent(symbol), muteHttpExceptions: true });
     }
     
     var responses = UrlFetchApp.fetchAll(fetchRequests);
@@ -1146,6 +1144,11 @@ function fetchMarketPrices(uniqueAssets, assetTypesMap, assetCurrenciesMap) {
       if (eurPrice) liveRates.EUR = eurPrice;
     } catch(e) {}
     
+    var fallbackHeaders = {
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+      "Accept": "application/json"
+    };
+
     for (var j = 0; j < cleanAssets.length; j++) {
       var asset = cleanAssets[j];
       var sym = resolvedSymbols[j];
@@ -1182,10 +1185,29 @@ function fetchMarketPrices(uniqueAssets, assetTypesMap, assetCurrenciesMap) {
         errorMsg = parseErr.toString();
       }
 
-      // If query1 failed or returned empty price, attempt query2 fallback with browser UA
-      if ((price === undefined || price === null || isNaN(price) || price <= 0)) {
+      // Fallback 1: Yahoo Finance /v8/finance/spark endpoint
+      if (price === undefined || price === null || isNaN(price) || price <= 0) {
         try {
-          var q2Resp = UrlFetchApp.fetch("https://query2.finance.yahoo.com/v8/finance/chart/" + encodeURIComponent(sym), { headers: defaultHeaders, muteHttpExceptions: true });
+          var sparkResp = UrlFetchApp.fetch("https://query1.finance.yahoo.com/v8/finance/spark?symbols=" + encodeURIComponent(sym) + "&range=5d&interval=1d", { muteHttpExceptions: true });
+          if (sparkResp.getResponseCode() === 200) {
+            var sparkRes = JSON.parse(sparkResp.getContentText());
+            var sparkEntry = sparkRes && sparkRes[sym];
+            if (sparkEntry && Array.isArray(sparkEntry.close)) {
+              for (var sc = sparkEntry.close.length - 1; sc >= 0; sc--) {
+                if (sparkEntry.close[sc] !== null && !isNaN(sparkEntry.close[sc]) && sparkEntry.close[sc] > 0) {
+                  price = sparkEntry.close[sc];
+                  break;
+                }
+              }
+            }
+          }
+        } catch (sparkErr) {}
+      }
+
+      // Fallback 2: query2.finance.yahoo.com with browser UA
+      if (price === undefined || price === null || isNaN(price) || price <= 0) {
+        try {
+          var q2Resp = UrlFetchApp.fetch("https://query2.finance.yahoo.com/v8/finance/chart/" + encodeURIComponent(sym), { headers: fallbackHeaders, muteHttpExceptions: true });
           if (q2Resp.getResponseCode() === 200) {
             var q2Res = JSON.parse(q2Resp.getContentText());
             var q2Meta = q2Res && q2Res.chart && q2Res.chart.result && q2Res.chart.result[0] && q2Res.chart.result[0].meta;

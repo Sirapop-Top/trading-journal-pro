@@ -11,6 +11,7 @@ import {
 import dayjs from 'dayjs';
 import { useAppData } from '../../context/AppDataContext.jsx';
 import { MobileJournalFeed } from './MobileJournalFeed.jsx';
+import { resolveLivePrice } from '../../lib/portfolioEngine.js';
 
 const { Title, Text } = Typography;
 const { Option } = Select;
@@ -200,7 +201,7 @@ export const JournalTab = () => {
       width: 130,
       className: 'financial-num',
       render: (_, record) => {
-        const lp = livePrices[record.assetName];
+        const lp = resolveLivePrice(livePrices, record.assetName, record.assetType);
         if (lp === undefined || lp === null) return '-';
         const rateToTHB = liveRates[record.currency] || 1.0;
         const displayRateToTHB = liveRates[displayCurrency] || 1.0;

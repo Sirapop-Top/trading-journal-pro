@@ -8,6 +8,7 @@ import {
   editTradeApi,
   updateTradePortfolioApi
 } from '../api/sheetsClient.js';
+import { resolveLivePrice } from '../lib/portfolioEngine.js';
 
 export const useTradeActions = ({
   journal,
@@ -294,9 +295,8 @@ export const useTradeActions = ({
       const rateToTHB = journal.liveRates[trade.currency] || 1.0;
       const displayRateToTHB = journal.liveRates[journal.displayCurrency] || 1.0;
 
-      const livePriceLocal = journal.livePrices[trade.assetName] !== undefined
-        ? journal.livePrices[trade.assetName]
-        : price;
+      const resolvedLive = resolveLivePrice(journal.livePrices, trade.assetName, trade.assetType);
+      const livePriceLocal = resolvedLive !== null ? resolvedLive : price;
 
       const livePriceConverted = (livePriceLocal * rateToTHB) / displayRateToTHB;
       const liveValueConverted = livePriceConverted * qty;

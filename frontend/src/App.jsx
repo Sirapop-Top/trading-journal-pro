@@ -16,6 +16,7 @@ import { LogTradeModal } from './components/modals/LogTradeModal.jsx';
 import { EditStrategyModal } from './components/modals/EditStrategyModal.jsx';
 import { PortfolioModals } from './components/modals/PortfolioModals.jsx';
 import { CsvImportModal } from './components/modals/CsvImportModal.jsx';
+import { MarketDiagnosticsModal } from './components/modals/MarketDiagnosticsModal.jsx';
 
 const { Content } = Layout;
 
@@ -119,6 +120,7 @@ const AppContent = () => {
       <LogTradeModal />
       <EditStrategyModal />
       <PortfolioModals />
+      <MarketDiagnosticsModal />
       {isImportModalOpen && (
         <CsvImportModal open={isImportModalOpen} onClose={() => setIsImportModalOpen(false)} />
       )}

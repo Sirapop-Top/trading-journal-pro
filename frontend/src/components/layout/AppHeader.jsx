@@ -37,7 +37,8 @@ export const AppHeader = () => {
     dateRangePreset,
     setDateRangePreset,
     customDateRange,
-    setCustomDateRange
+    setCustomDateRange,
+    setIsMarketModalOpen
   } = useAppData();
 
   if (isMobile) {
@@ -248,7 +249,12 @@ export const AppHeader = () => {
         </div>
 
         {syncTime && (
-          <Text style={{ fontSize: '11px', color: '#10b981', fontWeight: 600, background: 'rgba(16, 185, 129, 0.08)', padding: '5px 10px', borderRadius: '6px', border: '1px solid rgba(16, 185, 129, 0.2)' }} className="financial-num">
+          <Text
+            onClick={() => setIsMarketModalOpen && setIsMarketModalOpen(true)}
+            title="Click to inspect Yahoo Finance market prices & diagnostics"
+            style={{ fontSize: '11px', color: '#10b981', fontWeight: 600, background: 'rgba(16, 185, 129, 0.08)', padding: '5px 10px', borderRadius: '6px', border: '1px solid rgba(16, 185, 129, 0.2)', cursor: 'pointer' }}
+            className="financial-num"
+          >
             🟢 {syncTime}
           </Text>
         )}

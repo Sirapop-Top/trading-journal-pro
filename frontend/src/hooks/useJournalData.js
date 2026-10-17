@@ -2,25 +2,60 @@ import { useState, useEffect, useCallback } from 'react';
 import { message } from 'antd';
 import dayjs from 'dayjs';
 import { fetchSheetCsv, fetchExchangeRates, fetchLiveData, fetchBinanceCryptoPrices } from '../api/sheetsClient.js';
+import yahooSnapshot from '../data/yahooPricesSnapshot.json';
+
+const isTestEnv = Boolean(import.meta.env && import.meta.env.VITEST);
+const defaultYahooPrices = (!isTestEnv && yahooSnapshot && yahooSnapshot.livePrices) ? yahooSnapshot.livePrices : {};
+const defaultYahooRates = (!isTestEnv && yahooSnapshot && yahooSnapshot.liveRates)
+  ? yahooSnapshot.liveRates
+  : { THB: 1.0, USD: 32.69, EUR: 38.04 };
 
 export const useJournalData = () => {
   const [trades, setTrades] = useState([]);
   const [portfolios, setPortfolios] = useState(['Main Trading', 'BTC Stock', 'Crypto']);
   const [activePortfolio, setActivePortfolio] = useState('All Portfolios');
   const [displayCurrency, setDisplayCurrency] = useState('THB');
-  const [livePrices, setLivePrices] = useState(() => {
+  const [manualPrices, setManualPrices] = useState(() => {
     if (typeof localStorage === 'undefined') return {};
     try {
-      // Purge old stale caches
-      localStorage.removeItem('alphatrader_live_prices');
-      localStorage.removeItem('alphatrader_live_prices_v2');
-      return JSON.parse(localStorage.getItem('alphatrader_live_prices_v3') || '{}');
+      return JSON.parse(localStorage.getItem('alphatrader_manual_prices') || '{}');
     } catch {
       return {};
     }
   });
-  const [liveRates, setLiveRates] = useState({ THB: 1.0, USD: 32.69, EUR: 38.04 });
-  const [syncTime, setSyncTime] = useState(null);
+  const [priceSources, setPriceSources] = useState(() => {
+    if (isTestEnv) return {};
+    const initialSources = {};
+    Object.keys(defaultYahooPrices).forEach(k => {
+      initialSources[k.toUpperCase()] = 'yahoo';
+    });
+    if (typeof localStorage !== 'undefined') {
+      try {
+        const manual = JSON.parse(localStorage.getItem('alphatrader_manual_prices') || '{}');
+        Object.keys(manual).forEach(k => {
+          initialSources[k.toUpperCase()] = 'manual';
+        });
+      } catch {}
+    }
+    return initialSources;
+  });
+  const [isMarketModalOpen, setIsMarketModalOpen] = useState(false);
+
+  const [livePrices, setLivePrices] = useState(() => {
+    if (typeof localStorage === 'undefined') return { ...defaultYahooPrices };
+    try {
+      // Purge old stale caches
+      localStorage.removeItem('alphatrader_live_prices');
+      localStorage.removeItem('alphatrader_live_prices_v2');
+      const cached = JSON.parse(localStorage.getItem('alphatrader_live_prices_v3') || '{}');
+      const manual = JSON.parse(localStorage.getItem('alphatrader_manual_prices') || '{}');
+      return { ...defaultYahooPrices, ...cached, ...manual };
+    } catch {
+      return { ...defaultYahooPrices };
+    }
+  });
+  const [liveRates, setLiveRates] = useState(defaultYahooRates);
+  const [syncTime, setSyncTime] = useState(() => (!isTestEnv && yahooSnapshot?.updatedAt ? dayjs(yahooSnapshot.updatedAt).format('YYYY-MM-DD HH:mm:ss') : null));
   const [isSyncing, setIsSyncing] = useState(false);
   const [autoRefresh, setAutoRefresh] = useState(false);
   const [isCensored, setIsCensored] = useState(false);
@@ -77,6 +112,7 @@ export const useJournalData = () => {
     const actionIdx = findColIdx(['action']);
     const quantityIdx = findColIdx(['quantity', 'qty']);
     const priceUnitIdx = findColIdx(['price/unit', 'price_unit', 'price unit', 'price']);
+    const currentPriceIdx = findColIdx(['current price', 'current_price', 'market price']);
     const whyIdx = findColIdx(['why', 'decision', 'reason']);
     const remarkIdx = findColIdx(['remark', 'note']);
     const portfolioIdx = findColIdx(['portfolio', 'port']);
@@ -86,6 +122,7 @@ export const useJournalData = () => {
 
     const loadedTrades = [];
     const loadedPortfolios = new Set();
+    const sheetCurrentPrices = {};
 
     // Fetch Portfolios config sheet if it exists
     let customMappings = {};
@@ -176,6 +213,12 @@ export const useJournalData = () => {
 
       const qty = quantityIdx !== -1 ? parseFloat(row[quantityIdx]) : 0;
       const price = priceUnitIdx !== -1 ? parseFloat(row[priceUnitIdx]) : 0;
+      if (currentPriceIdx !== -1 && row[currentPriceIdx]) {
+        const sheetPrice = parseFloat(String(row[currentPriceIdx]).replace(/[,฿$€]/g, '').trim());
+        if (!isNaN(sheetPrice) && sheetPrice > 0) {
+          sheetCurrentPrices[assetName.toUpperCase()] = sheetPrice;
+        }
+      }
 
       let parsedFee = 0.0;
       if (feeAmountIdx !== -1 && row[feeAmountIdx]) {
@@ -210,6 +253,23 @@ export const useJournalData = () => {
     setTrades(loadedTrades);
     setPortfolios(Array.from(loadedPortfolios));
     setGoogleSheetSyncCount(loadedTrades.length);
+
+    if (Object.keys(defaultYahooPrices).length > 0 || Object.keys(sheetCurrentPrices).length > 0) {
+      setLivePrices(prev => {
+        const manual = (() => {
+          try {
+            return JSON.parse(localStorage.getItem('alphatrader_manual_prices') || '{}');
+          } catch {
+            return {};
+          }
+        })();
+        const merged = { ...defaultYahooPrices, ...prev, ...sheetCurrentPrices, ...manual };
+        try {
+          localStorage.setItem('alphatrader_live_prices_v3', JSON.stringify(merged));
+        } catch {}
+        return merged;
+      });
+    }
 
     // Direct Binance crypto fetch only for crypto assets
     const cryptoSymbols = Array.from(new Set(
@@ -463,10 +523,36 @@ export const useJournalData = () => {
       }
       if (rates) setLiveRates(rates);
 
-      // 4. Merge all prices: script livePrices first, crypto prices only applied to crypto
+      // 4. Merge all prices with precedence: Manual > Apps Script (Yahoo) > Binance (Crypto)
+      const currentManual = (() => {
+        try {
+          return JSON.parse(localStorage.getItem('alphatrader_manual_prices') || '{}');
+        } catch {
+          return {};
+        }
+      })();
+
+      const scriptPrices = (scriptData && scriptData.livePrices) ? scriptData.livePrices : {};
+      const newPriceSources = {};
+      Object.keys(defaultYahooPrices).forEach(k => {
+        newPriceSources[k.toUpperCase()] = 'yahoo';
+      });
+      Object.keys(scriptPrices).forEach(k => {
+        newPriceSources[k.toUpperCase()] = 'yahoo';
+      });
+      Object.keys(cryptoPrices).forEach(k => {
+        newPriceSources[k.toUpperCase()] = 'binance';
+      });
+      Object.keys(currentManual).forEach(k => {
+        newPriceSources[k.toUpperCase()] = 'manual';
+      });
+      setPriceSources(newPriceSources);
+
       const combinedPrices = {
-        ...(scriptData && scriptData.livePrices ? scriptData.livePrices : {}),
-        ...cryptoPrices
+        ...defaultYahooPrices,
+        ...scriptPrices,
+        ...cryptoPrices,
+        ...currentManual
       };
 
       if (Object.keys(combinedPrices).length > 0) {
@@ -511,7 +597,7 @@ export const useJournalData = () => {
 
           message.success(`Live market synced (${updatedCount} assets${sampleInfo ? ': ' + sampleInfo : ''}).`);
         } else if (!scriptUrl) {
-          message.warning('Google Apps Script URL is not configured. Currency rates updated.');
+          message.warning('Google Apps Script URL is not configured. Live stock prices cannot be fetched without it. Click to configure or set manual prices.');
         } else {
           message.info('Market sync completed.');
         }
@@ -532,6 +618,80 @@ export const useJournalData = () => {
       if (!silent) setIsSyncing(false);
     }
   }, [trades]);
+
+  const updateManualPrice = useCallback((rawSymbol, price) => {
+    if (!rawSymbol) return;
+    const symbol = rawSymbol.trim().toUpperCase();
+    const numPrice = parseFloat(price);
+    if (isNaN(numPrice) || numPrice <= 0) {
+      message.warning('Please enter a valid positive price.');
+      return;
+    }
+
+    setManualPrices(prev => {
+      const updated = { ...prev, [symbol]: numPrice };
+      try {
+        localStorage.setItem('alphatrader_manual_prices', JSON.stringify(updated));
+      } catch {}
+      return updated;
+    });
+
+    setLivePrices(prev => {
+      const updated = { ...prev, [symbol]: numPrice };
+      if (!symbol.includes('.')) {
+        updated[`${symbol}.BK`] = numPrice;
+      } else if (symbol.endsWith('.BK')) {
+        updated[symbol.replace('.BK', '')] = numPrice;
+      }
+      try {
+        localStorage.setItem('alphatrader_live_prices_v3', JSON.stringify(updated));
+      } catch {}
+      return updated;
+    });
+
+    setPriceSources(prev => ({
+      ...prev,
+      [symbol]: 'manual'
+    }));
+
+    message.success(`Updated manual price for ${symbol}: ${numPrice}`);
+  }, []);
+
+  const clearManualPrice = useCallback((rawSymbol) => {
+    if (!rawSymbol) return;
+    const symbol = rawSymbol.trim().toUpperCase();
+    setManualPrices(prev => {
+      const updated = { ...prev };
+      delete updated[symbol];
+      try {
+        localStorage.setItem('alphatrader_manual_prices', JSON.stringify(updated));
+      } catch {}
+      return updated;
+    });
+    setPriceSources(prev => {
+      const updated = { ...prev };
+      delete updated[symbol];
+      return updated;
+    });
+    message.info(`Cleared manual price for ${symbol}. Syncing live price...`);
+    syncMarketData(true);
+  }, [syncMarketData]);
+
+  const clearAllManualPrices = useCallback(() => {
+    setManualPrices({});
+    setPriceSources(prev => {
+      const updated = { ...prev };
+      Object.keys(updated).forEach(k => {
+        if (updated[k] === 'manual') delete updated[k];
+      });
+      return updated;
+    });
+    try {
+      localStorage.removeItem('alphatrader_manual_prices');
+    } catch {}
+    message.info('Cleared all manual prices. Re-syncing live market prices...');
+    syncMarketData(true);
+  }, [syncMarketData]);
 
   const handleSaveGoogleSheetSettings = useCallback(async () => {
     setIsSyncingSheet(true);
@@ -614,6 +774,15 @@ export const useJournalData = () => {
     setCloudConnectionError,
     isConnected,
     setIsConnected,
+    manualPrices,
+    setManualPrices,
+    priceSources,
+    setPriceSources,
+    isMarketModalOpen,
+    setIsMarketModalOpen,
+    updateManualPrice,
+    clearManualPrice,
+    clearAllManualPrices,
     fetchData,
     syncMarketData,
     handleSaveGoogleSheetSettings,

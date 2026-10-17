@@ -12,7 +12,8 @@ export const KpiCards = () => {
     kpis,
     portfolioSizing,
     formatCurrency,
-    cashKpis
+    cashKpis,
+    setIsMarketModalOpen
   } = useAppData();
 
   const netAssetValue = (portfolioSizing?.cashOnHand || 0) + (kpis?.currentMarketValueConverted || 0);
@@ -166,7 +167,11 @@ export const KpiCards = () => {
                   Paper: <strong style={{ color: (kpis?.totalUnrealizedPnLConverted || 0) >= 0 ? 'var(--success-color)' : 'var(--danger-color)' }}>
                     {(kpis?.totalUnrealizedPnLConverted || 0) >= 0 ? '+' : ''}{formatCurrency(kpis?.totalUnrealizedPnLConverted)}
                     {kpis?.unpricedHoldingsCount > 0 && (
-                      <span style={{ fontSize: '10px', color: '#f59e0b', marginLeft: '4px', fontWeight: 500 }}>
+                      <span
+                        onClick={() => setIsMarketModalOpen && setIsMarketModalOpen(true)}
+                        style={{ fontSize: '10px', color: '#f59e0b', marginLeft: '4px', fontWeight: 500, cursor: 'pointer', textDecoration: 'underline' }}
+                        title="Click to inspect or override market prices"
+                      >
                         ({kpis.unpricedHoldingsCount} unpriced)
                       </span>
                     )}
@@ -202,7 +207,10 @@ export const KpiCards = () => {
                 {(kpis?.totalUnrealizedPnLConverted || 0) >= 0 ? '+' : ''}{formatCurrency(kpis?.totalUnrealizedPnLConverted)}
               </span>
               {kpis?.unpricedHoldingsCount > 0 && (
-                <span style={{ fontSize: '10px', color: '#f59e0b', display: 'block' }}>
+                <span
+                  onClick={() => setIsMarketModalOpen && setIsMarketModalOpen(true)}
+                  style={{ fontSize: '10px', color: '#f59e0b', display: 'block', cursor: 'pointer', textDecoration: 'underline' }}
+                >
                   {kpis.unpricedHoldingsCount} unpriced
                 </span>
               )}
